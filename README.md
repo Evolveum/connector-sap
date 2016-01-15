@@ -1,2 +1,2 @@
-# connector-jira
-ConnId/Polygon connector for Atlassian Jira
+# connector-sap
+ConnId/Polygon connector for SAP
