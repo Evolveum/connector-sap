@@ -44,20 +44,35 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     private static final String SEPARATOR = "."; // between structure and his attributes, for example ADDRESS.FIRSTNAME
     // used BAPI functions in connector
     private static final String[] BAPI_FUNCTION_LIST = {"BAPI_USER_GETLIST", "BAPI_USER_GET_DETAIL", "BAPI_USER_CREATE1",
-            "BAPI_USER_EXISTENCE_CHECK", "BAPI_TRANSACTION_COMMIT", "BAPI_TRANSACTION_ROLLBACK", "BAPI_USER_DELETE",
+            "BAPI_TRANSACTION_COMMIT", "BAPI_TRANSACTION_ROLLBACK", "BAPI_USER_DELETE",
             "BAPI_USER_CHANGE", "BAPI_USER_LOCK", "BAPI_USER_UNLOCK", "BAPI_USER_ACTGROUPS_ASSIGN",
+            "RFC_GET_TABLE_ENTRIES", "SUSR_USER_CHANGE_PASSWORD_RFC", "SUSR_GENERATE_PASSWORD",
 
-            "SUSR_USER_CHANGE_PASSWORD_RFC", "COLL_ACTGROUPS_LOAD_ALL", /*"SUSR_USER_LOCAGR_ACTGROUPS_GET",*/ /* TODO */
-            /*"BAPI_USER_CREATE", "BAPI_USER_DISPLAY", "BAPI_USER_EXISTENCE_CHECK", "BAPI_USER_LOCACTGROUPS_ASSIGN",
-            "BAPI_USER_LOCACTGROUPS_READ", "BAPI_USER_LOCPROFILES_ASSIGN", "BAPI_USER_LOCPROFILES_READ", "BAPI_USER_PROFILES_ASSIGN"*/
-//            "BAPI_PDOTYPES_GET_DETAILEDLIST", "BAPI_ADDRESSORG_GETDETAIL", "SUSR_USER_CHANGE_PASSWORD_RFC"
-//            "BAPI_ORGUNITEXT_DATA_GET", "BAPI_OUTEMPLOYEE_GETLIST", "BAPI_EMPLOYEE_GETDATA",
-            "RFC_GET_TABLE_ENTRIES", "BAPI_ACTIVITYTYPEGRP_GETLIST"};
+            /* "SUSR_LOGIN_CHECK_RFC", "PASSWORD_FORMAL_CHECK" */
+
+
+            /*"BAPI_ADDRESSORG_GETDETAIL", "BAPI_ORGUNITEXT_DATA_GET", */ /* BAPI to Read Organization Addresses, Get data on organizational unit  */
+
+            /*"BAPI_OUTEMPLOYEE_GETLIST", "BAPI_EMPLOYEE_GETDATA", */ /* List of employees in a payroll area, Find Personnel Numbers for Specified Search Criteria */
+
+
+            /*"BAPI_USER_PROFILES_ASSIGN", "BAPI_USER_PROFILES_DELETE" */ /* NON CUA landscape */
+            /*"BAPI_USER_LOCPROFILES_ASSIGN", "BAPI_USER_LOCPROFILES_READ", "BAPI_USER_LOCPROFILES_DELETE" */ /* CUA landscape*/
+            /*"BAPI_USER_LOCACTGROUPS_READ", "BAPI_USER_LOCACTGROUPS_DELETE", "BAPI_USER_LOCACTGROUPS_ASSIGN" */ /* CUA landscape*/
+
+            /*"BAPI_USER_EXISTENCE_CHECK", */ /* handled over Exception and parameter RETURN */
+            /*"BAPI_USER_ACTGROUPS_DELETE", */ /* replaced with BAPI_USER_ACTGROUPS_ASSIGN */
+            /*"BAPI_USER_DISPLAY",*/ /*Don't need, using BAPI_USER_GET_DETAIL */
+            /*"SUSR_BAPI_USER_LOCK", "SUSR_BAPI_USER_UNLOCK", "BAPI_USER_CREATE" */ /*DO NOT USE !*/
+    };
 
     // supported structures reading & writing
-    private static final String[] ACCOUNT_PARAMETER_LIST = {"ADDRESS", "DEFAULTS", "UCLASS", "LOGONDATA", "ALIAS", "COMPANY"};
+    private static final String[] ACCOUNT_PARAMETER_LIST = {"ADDRESS", "DEFAULTS", "UCLASS", "LOGONDATA", "ALIAS", "COMPANY", "REF_USER"};
     // supported structures for only for reading
-    private static final String[] READ_ONLY_ACCOUNT_PARAMETER_LIST = {"ISLOCKED", "LASTMODIFIED", "REF_USER", "SNC"};
+    private static final String[] READ_ONLY_ACCOUNT_PARAMETER_LIST = {"ISLOCKED", "LASTMODIFIED", "SNC", "ADMINDATA", "IDENTITY"};
+    // only create attributes, not to modify, becouse ADDRESSX don't contains these fiels
+    private static final String[] CREATE_ONLY_ATTRIBUTES = {"ADDRESS"+SEPARATOR+"COUNTY_CODE", "ADDRESS"+SEPARATOR+"COUNTY",
+            "ADDRESS"+SEPARATOR+"TOWNSHIP_CODE", "ADDRESS"+SEPARATOR+"TOWNSHIP", "DEFAULTS"+SEPARATOR+"CATTKENNZ"};
 
     // LOGONDATA
     private static final String GLTGV = "GLTGV";        //User valid from, AttributeInfo ENABLE_DATE, "LOGONDATA.GLTGV"
@@ -71,7 +86,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     // PASSWORD
     private static final String BAPIPWD = "BAPIPWD";
 
-    private static final String ACTIVITYGROUPS = "ACTIVITYGROUPS";
+    public static final String ACTIVITYGROUPS = "ACTIVITYGROUPS";
 
     public static final SimpleDateFormat SAP_DF = new SimpleDateFormat("yyyy-MM-dd");
     public static final SimpleDateFormat DATE_TIME = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
@@ -122,7 +137,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         // read schema
         schema();
 
-        LOG.ok("Initialization finished, configuration: {0}", this.configuration.toString());
+        LOG.info("Initialization finished, configuration: {0}", this.configuration.toString());
     }
 
     @Override
@@ -156,11 +171,12 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 }
                 // testing creation of transaction
                 if (configuration.getUseTransaction()) {
-                    destination.createTID();
+                    JCoContext.begin(destination);
+                    JCoContext.end(destination);
                 }
             }
         } catch (JCoException e) {
-            throw new ConnectorIOException(e.getMessage(), e);
+            throw new ConfigurationException(e.getMessage(), e);
         }
     }
 
@@ -266,37 +282,19 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 try {
                     classs = Class.forName(className);
                 } catch (ClassNotFoundException cnfe) {
-                    LOG.warn("Not supported class type: " + attrName + "\t" + length + "\t" + className + "\t" + rmd.getRecordTypeName(r) + "\t" + rmd.getTypeAsString(r) + ", ex: " + cnfe);
+                    if (!"byte[]".equals(className)) {
+                        LOG.warn("Not supported class type: " + attrName + "\t" + length + "\t" + className + "\t" + rmd.getRecordTypeName(r) + "\t" + rmd.getTypeAsString(r) + ", ex: " + cnfe);
+                    }
                 }
                 if (classs != null && FrameworkUtil.isSupportedAttributeType(classs)) {
-                    AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(attrName, classs);
-                    if (readOnly) {
-                        attributeInfoBuilder.setCreateable(false);
-                        attributeInfoBuilder.setUpdateable(false);
-                    }
-                    objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
+                    objClassBuilder.addAttributeInfo(createAttributeInfo(param, attrName, classs, readOnly));
                 } else if ("java.util.Date".equals(className)) {
-                    AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(attrName, Long.class);
-                    if (readOnly) {
-                        attributeInfoBuilder.setCreateable(false);
-                        attributeInfoBuilder.setUpdateable(false);
-                    }
-                    objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
-                    LOG.warn(className + " symulated as java.lang.Long over connector for: " + attrName);
+                    objClassBuilder.addAttributeInfo(createAttributeInfo(param, attrName, Long.class, readOnly));
+                    LOG.ok(className + " symulated as java.lang.Long over connector for: " + attrName);
                 } else if ("byte[]".equals(className)) {
-                    AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(attrName, byte[].class);
-                    if (readOnly) {
-                        attributeInfoBuilder.setCreateable(false);
-                        attributeInfoBuilder.setUpdateable(false);
-                    }
-                    objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
+                    objClassBuilder.addAttributeInfo(createAttributeInfo(param, attrName, byte[].class, readOnly));
                 } else {
-                    AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(attrName);
-                    if (readOnly) {
-                        attributeInfoBuilder.setCreateable(false);
-                        attributeInfoBuilder.setUpdateable(false);
-                    }
-                    objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
+                    objClassBuilder.addAttributeInfo(createAttributeInfo(param, attrName, String.class, readOnly));
                     LOG.warn("TODO: implement better support for " + className + ", attribute " + attrName + " if you need it, I'm using java.lang.String");
                 }
                 this.sapAttributesLength.put(attrName, length);
@@ -307,6 +305,21 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         }
     }
 
+
+    private AttributeInfo createAttributeInfo(String structure, String attrName, Class classs, boolean readOnly) {
+        AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(attrName, classs);
+        if (readOnly) {
+            attributeInfoBuilder.setCreateable(false);
+            attributeInfoBuilder.setUpdateable(false);
+        }
+        else if (contains(CREATE_ONLY_ATTRIBUTES, structure+SEPARATOR+attrName)) {
+            attributeInfoBuilder.setCreateable(true);
+            attributeInfoBuilder.setUpdateable(false);
+        }
+
+        return attributeInfoBuilder.build();
+    }
+
     @Override
     public FilterTranslator<SapFilter> createFilterTranslator(ObjectClass objectClass, OperationOptions operationOptions) {
         return new SapFilterTranslator();
@@ -314,7 +327,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
     @Override
     public void executeQuery(ObjectClass objectClass, SapFilter query, ResultsHandler handler, OperationOptions options) {
-        LOG.ok("executeQuery: {0}, options: {1}, objectClass: {2}", query, options, objectClass);
+        LOG.info("executeQuery: {0}, options: {1}, objectClass: {2}", query, options, objectClass);
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
 
             executeAccountQuery(objectClass, query, handler, options);
@@ -338,54 +351,71 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
     private void executeTableQuery(String tableName, SapFilter query, ResultsHandler handler, OperationOptions options) {
         try {
-            JCoFunction function = destination.getRepository().getFunction("RFC_GET_TABLE_ENTRIES");
-            if (function == null)
-                throw new RuntimeException("RFC_GET_TABLE_ENTRIES not found in SAP.");
+            if (query != null && query.getByNameContains() != null) {
+                throw new UnsupportedOperationException("In table: "+tableName+" we can't use CONTAINS operation in query");
+            } else {
+                // find all or find by key
 
-            function.getImportParameterList().setValue("TABLE_NAME", tableName);
+                JCoFunction function = destination.getRepository().getFunction("RFC_GET_TABLE_ENTRIES");
+                if (function == null)
+                    throw new RuntimeException("RFC_GET_TABLE_ENTRIES not found in SAP.");
 
-            function.execute(destination);
+                function.getImportParameterList().setValue("TABLE_NAME", tableName);
+                // find by key
+                if (query != null && query.getByName() != null) {
+                    function.getImportParameterList().setValue("GEN_KEY", query.getByName());
+                    LOG.ok("query by Key: "+query.getByName()+" on table: "+tableName);
+                }
+                // else find all
 
-            JCoTable entries = function.getTableParameterList().getTable("ENTRIES");
+                function.execute(destination);
 
-            LOG.info("Entries: " + function.getExportParameterList().getValue("NUMBER_OF_ENTRIES"));
+                JCoTable entries = function.getTableParameterList().getTable("ENTRIES");
 
-            entries.firstRow();
-            if (entries.getNumRows() > 0) {
-                do {
-                    String value = entries.getString("WA");
-                    int index = 0;
+                LOG.info("Entries: " + function.getExportParameterList().getValue("NUMBER_OF_ENTRIES"));
 
-                    ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
-                    List<String> keys = new LinkedList<String>();
+                entries.firstRow();
+                if (entries.getNumRows() > 0) {
+                    do {
+                        String value = entries.getString("WA");
+                        int index = 0;
 
-                    for (Map.Entry<String, Integer> entry : configuration.tableMetadatas.get(tableName).entrySet()) {
-                        String column = entry.getKey();
-                        Integer length = entry.getValue();
+                        ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
+                        List<String> keys = new LinkedList<String>();
 
-                        String columnValue = value.substring(index, index + length).trim();
-                        addAttr(builder, column, columnValue);
-                        if (configuration.tableKeys.get(tableName).contains(column)) {
-                            keys.add(columnValue);
+                        for (Map.Entry<String, Integer> entry : configuration.tableMetadatas.get(tableName).entrySet()) {
+                            String column = entry.getKey();
+                            Integer length = entry.getValue();
+
+                            String columnValue = value.substring(index, index + length).trim();
+                            addAttr(builder, column, columnValue);
+                            if (configuration.tableKeys.get(tableName).contains(column)) {
+                                keys.add(columnValue);
+                            }
+
+                            index += length;
                         }
 
-                        index += length;
-                    }
-
-                    StringBuilder concatenatedKey = new StringBuilder();
-                    for (String key : keys) {
-                        if (concatenatedKey.length() != 0) {
-                            concatenatedKey.append(":");
+                        StringBuilder concatenatedKey = new StringBuilder();
+                        for (String key : keys) {
+                            if (concatenatedKey.length() != 0) {
+                                concatenatedKey.append(":");
+                            }
+                            concatenatedKey.append(key);
                         }
-                        concatenatedKey.append(key);
-                    }
 
-                    builder.setUid(concatenatedKey.toString());
-                    builder.setName(concatenatedKey.toString());
+                        builder.setUid(concatenatedKey.toString());
+                        builder.setName(concatenatedKey.toString());
 
-                    handler.handle(builder.build());
+                        ObjectClass objectClass = new ObjectClass(tableName);
+                        builder.setObjectClass(objectClass);
 
-                } while (entries.nextRow());
+                        ConnectorObject build = builder.build();
+                        LOG.ok("ConnectorObject: {0}", build);
+                        handler.handle(build);
+
+                    } while (entries.nextRow());
+                }
             }
         } catch (JCoException e) {
             throw new ConnectorIOException(e.getMessage(), e);
@@ -400,7 +430,6 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 JCoFunction function = destination.getRepository().getFunction("BAPI_USER_GET_DETAIL");
                 function.getImportParameterList().setValue("USERNAME", query.getByName());
                 executeFunction(function);
-                LOG.ok("User as XML, EXPORT: {0}\n TABLE: {1}", function.getExportParameterList().toXML(), function.getTableParameterList().toXML());
 
                 ConnectorObject connectorObject = convertUserToConnectorObject(function);
                 handler.handle(connectorObject);
@@ -478,6 +507,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                             if (handler.handle(connectorObject)) {
                                 handled++;
                             } else {
+                                LOG.ok("finishing read");
                                 break;
                             }
                         } while (userList.nextRow());
@@ -501,8 +531,10 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
                             ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail);
                             boolean finish = !handler.handle(connectorObject);
-                            if (finish)
+                            if (finish) {
+                                LOG.ok("finishing read");
                                 break;
+                            }
 
                         } while (userList.nextRow());
                     }
@@ -515,15 +547,8 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     }
 
     private List<String> executeFunction(JCoFunction function) throws JCoException {
-        return executeFunction(function, null);
-    }
+        function.execute(destination);
 
-    private List<String> executeFunction(JCoFunction function, String transactionId) throws JCoException {
-        if (transactionId != null) {
-            function.execute(destination, transactionId);
-        } else {
-            function.execute(destination);
-        }
         return parseReturnMessages(function.getTableParameterList());
     }
 
@@ -649,7 +674,16 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     }
 
     private <T> void addAttr(ConnectorObjectBuilder builder, String attrName, T attrVal) {
-        if (attrVal != null) {
+        // null value or "" (empty string) we don't return
+        boolean isNull = false;
+        if (attrVal == null) {
+            isNull = true;
+        }
+        else if (attrVal instanceof String && StringUtil.isEmpty((String)attrVal)) {
+            isNull = true;
+        }
+
+        if (!isNull) {
             if (attrVal instanceof Date) {
                 builder.addAttribute(attrName, ((Date) attrVal).getTime());
             } else if (attrVal instanceof byte[]) {
@@ -664,37 +698,54 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     @Override
     public Uid create(ObjectClass objectClass, Set<Attribute> attributes, OperationOptions options) {
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {    // __ACCOUNT__
-            String transactionId = null;
+            boolean needRollback = false;
             try {
                 if (configuration.getUseTransaction()) {
-                    transactionId = destination.createTID();
+                    JCoContext.begin(destination);
                 }
 
-                Uid uid = createUser(attributes, transactionId);
+                Uid uid = createUser(attributes);
 
                 if (configuration.getUseTransaction()) {
-                    transactionCommit(transactionId);
+                    transactionCommit();
                 }
 
                 return uid;
 
+            } catch (ConnectorException ce) {
+                if (configuration.getUseTransaction()) {
+                    needRollback = true;
+                }
+                throw ce; // handled in framework
             } catch (Exception e) {
                 if (configuration.getUseTransaction()) {
+                    needRollback = true;
+                }
+                // need to recreate
+                throw new ConnectorIOException(e.getMessage(), e);
+            } finally {
+                if (configuration.getUseTransaction()) {
                     try {
-                        transactionRollback(transactionId);
-                    } catch (JCoException e1) {
-                        LOG.error(e1, e1.toString());
+                        if (needRollback) {
+                            transactionRollback();
+                        }
+                    } catch (JCoException e) {
+                        LOG.warn(e, e.toString());
+                    }
+                    try {
+                        JCoContext.end(destination);
+                    } catch (JCoException e) {
+                        LOG.warn(e, e.toString());
                     }
                 }
-                throw new ConnectorIOException(e.getMessage(), e);
             }
         } else {
             throw new UnsupportedOperationException("Unsupported object class " + objectClass);
         }
     }
 
-    private Uid createUser(Set<Attribute> attributes, String transactionId) throws JCoException, ClassNotFoundException {
-        LOG.ok("createUser attributes: {0}, transactionId: {1}", attributes, transactionId);
+    private Uid createUser(Set<Attribute> attributes) throws JCoException, ClassNotFoundException {
+        LOG.info("createUser attributes: {0}", attributes);
 
         JCoFunction function = destination.getRepository().getFunction("BAPI_USER_CREATE1");
         if (function == null)
@@ -712,70 +763,131 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         // set other attributes
         setGenericAttributes(attributes, function.getImportParameterList(), false);
 
-        executeFunction(function, transactionId);
+        // handle password & execute create user
+        handlePassword(function, attributes, userName, false, true);
 
         String savedUserName = function.getImportParameterList().getString("USERNAME");
-        LOG.ok("Saved UserName: {0}, importParameterList: {1}", savedUserName, function.getImportParameterList().toXML());
+        LOG.info("Saved UserName: {0}, importParameterList: {1}", savedUserName, function.getImportParameterList().toXML());
 
         // assign ACTIVITYGROUPS if needed
-        assignActivityGroups(attributes, userName, transactionId);
+        assignActivityGroups(attributes, userName);
 
         // enable or disable user
-        enableOrDisableUser(attributes, userName, transactionId);
-
-        if (transactionId != null) {
-            destination.confirmTID(transactionId);
-        }
+        enableOrDisableUser(attributes, userName);
 
         return new Uid(savedUserName);
     }
 
-    private void transactionCommit(String transactionId) throws JCoException {
+    private boolean handlePassword(JCoFunction function, Set<Attribute> attributes, String userName, boolean updateUser, boolean updateNeeded) throws JCoException {
+        String passwordAttribute = OperationalAttributeInfos.PASSWORD.getName();
+        final StringBuilder pwd = new StringBuilder();
+        GuardedString password = getAttr(attributes, passwordAttribute, GuardedString.class, null);
+        // we need to set password
+        if (password != null) {
+            // unencrypt password
+            password.access(new GuardedString.Accessor() {
+                @Override
+                public void access(char[] chars) {
+                    pwd.append(new String(chars));
+                }
+            });
+
+            // check password length
+            if (configuration.getFailWhenTruncating() && pwd.toString().length() > sapAttributesLength.get(BAPIPWD)) {
+                throw new InvalidPasswordException("Attribute " + passwordAttribute + " with value XXXX (secured) is longer then maximum length in SAP " + sapAttributesLength.get(passwordAttribute + ", failWhenTruncating=enabled"));
+            }
+
+            // if we set two times the same password, SAP forbid to set the same password for second time - password policy
+            // so we first check if new password is not already set to SAP and if yes, we can ignore password update
+            if (isPasswordAlreadySet(userName, pwd.toString()))
+            {
+                // execute create or update user if needed
+                if (updateNeeded) {
+                    executeFunction(function);
+                }
+                // password was NOT updated
+                return false;
+            }
+
+            // we really need to set new password
+            if (!configuration.getChangePasswordAtNextLogon()) {
+                // if we need unexpired password, we must first set temp password
+                // (I need old password, but old password I don't have, so I change old password to tempPwd)
+                String tempPwd = generateTempPassword();
+                JCoStructure passwordStructure = function.getImportParameterList().getStructure("PASSWORD");
+                passwordStructure.setValue(BAPIPWD, tempPwd.toString());
+                if (updateUser) {
+                    JCoStructure passwordStructureX = function.getImportParameterList().getStructure("PASSWORDX");
+                    passwordStructureX.setValue(BAPIPWD, SELECT);
+                }
+                // execute create or update user
+                executeFunction(function);
+
+                // and in next step, temp password we change to needed password
+                JCoFunction changePassFunction = destination.getRepository().getFunction("SUSR_USER_CHANGE_PASSWORD_RFC");
+                if (changePassFunction == null)
+                    throw new RuntimeException("SUSR_USER_CHANGE_PASSWORD_RFC not found in SAP.");
+
+                changePassFunction.getImportParameterList().setValue("BNAME", userName);
+                changePassFunction.getImportParameterList().setValue("PASSWORD", tempPwd);
+                changePassFunction.getImportParameterList().setValue("NEW_PASSWORD", pwd.toString());
+
+                try {
+                    executeFunction(changePassFunction);
+                } catch (JCoException e) {
+                    LOG.error("can't change password: "+e, e);
+                    if (e.getGroup()==126 && "193".equalsIgnoreCase(e.getMessageNumber()))
+                        throw new PasswordExpiredException("Choose a password that is different from your last & passwords "+e, e);
+                    throw new RuntimeException(e);
+                }
+                LOG.ok("User "+userName+" don't need to change his password on next login." );
+            }
+            else {
+                // set password - need change it at next logon
+                JCoStructure passwordStructure = function.getImportParameterList().getStructure("PASSWORD");
+                passwordStructure.setValue(BAPIPWD, pwd.toString());
+                if (updateUser) {
+                    JCoStructure passwordStructureX = function.getImportParameterList().getStructure("PASSWORDX");
+                    passwordStructureX.setValue(BAPIPWD, SELECT);
+                }
+                // execute create or update user
+                executeFunction(function);
+                LOG.ok("User "+userName+" need to change his password on next login." );
+            }
+            // password was updated;
+            return true;
+        }
+        // we don't need to change password
+        else {
+            // execute create or update user if needed
+            if (updateNeeded) {
+                executeFunction(function);
+            }
+            // password was NOT updated;
+            return false;
+        }
+    }
+
+    private void transactionCommit() throws JCoException {
         JCoFunction function = destination.getRepository().getFunction("BAPI_TRANSACTION_COMMIT");
         if (function == null)
             throw new RuntimeException("BAPI_TRANSACTION_COMMIT not found in SAP.");
 
         function.getImportParameterList().setValue("WAIT", SELECT);
 
-        executeFunction(function, transactionId);
+        executeFunction(function);
     }
 
-    private void transactionRollback(String transactionId) throws JCoException {
+    private void transactionRollback() throws JCoException {
         JCoFunction function = destination.getRepository().getFunction("BAPI_TRANSACTION_ROLLBACK");
         if (function == null)
             throw new RuntimeException("BAPI_TRANSACTION_ROLLBACK not found in SAP.");
 
-        executeFunction(function, transactionId);
+        executeFunction(function);
     }
 
     private boolean setUserCustomAttributes(Set<Attribute> attributes, JCoParameterList importParameterList, boolean select) {
         boolean updateNeeded = false;
-
-        String passwordAttribute = OperationalAttributeInfos.PASSWORD.getName();
-
-        final StringBuilder sb = new StringBuilder();
-        GuardedString password = getAttr(attributes, passwordAttribute, GuardedString.class, null);
-        if (password != null) {
-            password.access(new GuardedString.Accessor() {
-                @Override
-                public void access(char[] chars) {
-                    sb.append(new String(chars));
-                }
-            });
-
-//            checkLength(sb.toString(), sapAttributesLength.get(passwordAttribute), passwordAttribute); // DO NOT USE - logging value
-            if (configuration.getFailWhenTruncating() && sb.toString().length() > sapAttributesLength.get(BAPIPWD)) {
-                throw new ConnectorException("Attribute " + passwordAttribute + " with value XXXX (secured) is longer then maximal length in SAP " + sapAttributesLength.get(passwordAttribute + ", failWhenTruncating=enabled"));
-            }
-
-            JCoStructure passwordStructure = importParameterList.getStructure("PASSWORD");
-            passwordStructure.setValue(BAPIPWD, sb.toString());
-            if (select) {
-                JCoStructure passwordStructureX = importParameterList.getStructure("PASSWORDX");
-                passwordStructureX.setValue(BAPIPWD, SELECT);
-                updateNeeded = true;
-            }
-        }
 
         Long enableDate = getAttr(attributes, OperationalAttributes.ENABLE_DATE_NAME, Long.class, null);
         Long disableDate = getAttr(attributes, OperationalAttributes.DISABLE_DATE_NAME, Long.class, null);
@@ -826,14 +938,33 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 if ("UCLASSX".equals(structureNameX)) {
                     attributeName = "UCLASS"; // not standard attribute :(
                 }
+                else if ("ALIASX".equals(structureNameX)) {
+                    attributeName = "BAPIALIAS"; // not standard attribute :(
+                }
                 LOG.ok("structureNameX: {0}, attributeName: {1}, length: {2}, className: {3}, value: {4}", structureNameX, attributeName, length, classs, SELECT);
                 JCoStructure structureX = importParameterList.getStructure(structureNameX);
-                structureX.setValue(attributeName, SELECT);
-                updateNeeded = true;
+                if (!contains(CREATE_ONLY_ATTRIBUTES, structureName+SEPARATOR+attributeName)) {
+                    structureX.setValue(attributeName, SELECT);
+                    updateNeeded = true;
+                }
+                else {
+                    LOG.warn("Attribute " + attributeName + " in structure " + structureNameX + " is only Creatable (not Updateable), ignoring changing it to " + value);
+                }
             }
         }
 
         return updateNeeded;
+    }
+
+
+    private boolean contains(String[] datas, String value) {
+        for (String data : datas) {
+            if (data.equalsIgnoreCase(value)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private String getStringAttr(Set<Attribute> attributes, String attrName, Integer length) throws InvalidAttributeValueException {
@@ -889,7 +1020,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     public void delete(ObjectClass objectClass, Uid uid, OperationOptions operationOptions) {
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
             try {
-                LOG.ok("delete user, Uid: {0}", uid);
+                LOG.info("delete user, Uid: {0}", uid);
 
                 JCoFunction function = destination.getRepository().getFunction("BAPI_USER_DELETE");
                 function.getImportParameterList().setValue("USERNAME", uid.getUidValue());
@@ -906,35 +1037,54 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     @Override
     public Uid update(ObjectClass objectClass, Uid uid, Set<Attribute> attributes, OperationOptions operationOptions) {
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
-            String transactionId = null;
+            boolean needRollback = false;
             try {
                 if (configuration.getUseTransaction()) {
-                    transactionId = destination.createTID();
+                    JCoContext.begin(destination);
                 }
-                Uid retUid = updateUser(uid, attributes, transactionId);
+
+                Uid retUid = updateUser(uid, attributes);
 
                 if (configuration.getUseTransaction()) {
-                    transactionCommit(transactionId);
+                    transactionCommit();
                 }
 
                 return retUid;
+
+            } catch (ConnectorException ce) {
+                if (configuration.getUseTransaction()) {
+                    needRollback = true;
+                }
+                throw ce; // handled in framework
             } catch (Exception e) {
                 if (configuration.getUseTransaction()) {
+                    needRollback = true;
+                }
+                // need to recreate
+                throw new ConnectorIOException(e.getMessage(), e);
+            } finally {
+                if (configuration.getUseTransaction()) {
                     try {
-                        transactionRollback(transactionId);
-                    } catch (JCoException e1) {
-                        LOG.error(e1, e1.toString());
+                        if (needRollback) {
+                            transactionRollback();
+                        }
+                    } catch (JCoException e) {
+                        LOG.warn(e, e.toString());
+                    }
+                    try {
+                        JCoContext.end(destination);
+                    } catch (JCoException e) {
+                        LOG.warn(e, e.toString());
                     }
                 }
-                throw new ConnectorIOException(e.getMessage(), e);
             }
         } else {
             throw new UnsupportedOperationException("Unsupported object class " + objectClass);
         }
     }
 
-    private Uid updateUser(Uid uid, Set<Attribute> attributes, String transactionId) throws JCoException, ClassNotFoundException {
-        LOG.ok("updateUser {0} attributes: {1}, transactionId: {2}", uid, attributes, transactionId);
+    private Uid updateUser(Uid uid, Set<Attribute> attributes) throws JCoException, ClassNotFoundException {
+        LOG.info("updateUser {0} attributes: {1}", uid, attributes);
 
         JCoFunction function = destination.getRepository().getFunction("BAPI_USER_CHANGE");
         if (function == null)
@@ -958,27 +1108,22 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         // set other attributes
         boolean updateNeededGeneric = setGenericAttributes(attributes, function.getImportParameterList(), true);
 
-        if (updateNeededCustom || updateNeededGeneric) {
-            executeFunction(function, transactionId);
-        }
+        // handle password & execute update user if needed
+        boolean updateNeededPassword =  handlePassword(function, attributes, userName, false, updateNeededCustom || updateNeededGeneric);
 
         String changedUserName = function.getImportParameterList().getString("USERNAME");
-        LOG.ok("Changed? {0}, UserName: {1}, importParameterList: {2}", (updateNeededCustom || updateNeededGeneric), changedUserName, function.getImportParameterList().toXML());
+        LOG.info("Changed? {0}, UserName: {1}, importParameterList: {2}", (updateNeededCustom || updateNeededGeneric || updateNeededPassword), changedUserName, function.getImportParameterList().toXML());
 
         // assign ACTIVITYGROUPS if needed
-        assignActivityGroups(attributes, userName, transactionId);
+        assignActivityGroups(attributes, userName);
 
         // enable or disable user
-        enableOrDisableUser(attributes, changedUserName, transactionId);
-
-        if (configuration.getUseTransaction()) {
-            destination.confirmTID(transactionId);
-        }
+        enableOrDisableUser(attributes, changedUserName);
 
         return new Uid(changedUserName);
     }
 
-    private void enableOrDisableUser(Set<Attribute> attributes, String userName, String transactionId) throws JCoException {
+    private void enableOrDisableUser(Set<Attribute> attributes, String userName) throws JCoException {
         Boolean enable = getAttr(attributes, OperationalAttributes.ENABLE_NAME, Boolean.class, null);
         if (enable != null) {
             String functionName = enable ? "BAPI_USER_UNLOCK" : "BAPI_USER_LOCK";
@@ -987,11 +1132,11 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 throw new RuntimeException(functionName + " not found in SAP.");
 
             functionLock.getImportParameterList().setValue("USERNAME", userName);
-            executeFunction(functionLock, transactionId);
+            executeFunction(functionLock);
         }
     }
 
-    private void assignActivityGroups(Set<Attribute> attributes, String userName, String transactionId) throws JCoException {
+    private void assignActivityGroups(Set<Attribute> attributes, String userName) throws JCoException {
         ActivityGroups activityGroups = null;
         try {
             activityGroups = new ActivityGroups(attributes, ACTIVITYGROUPS);
@@ -1018,9 +1163,9 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         }
 
         if (activityGroups.modify) {
-            executeFunction(functionAssign, transactionId);
+            executeFunction(functionAssign);
         }
-        LOG.ok("ACTGROUPS_ASSIGN modify {0}, TPL: {1}", activityGroups.modify, functionAssign.getTableParameterList().toXML());
+        LOG.info("ACTGROUPS_ASSIGN modify {0}, TPL: {1}", activityGroups.modify, functionAssign.getTableParameterList().toXML());
     }
 
     @Override
@@ -1037,7 +1182,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     }
 
     private void syncUser(SyncToken token, SyncResultsHandler handler, OperationOptions options) throws JCoException, ParseException {
-        LOG.ok("syncUser, token: {0}, options: {1}", token, options);
+        LOG.info("syncUser, token: {0}, options: {1}", token, options);
         Date fromToken = null;
         if (token != null) {
             Object fromTokenValue = token.getValue();
@@ -1104,7 +1249,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             } while (userList.nextRow());
         }
 
-        LOG.ok("{0} user(s) changed in SAP from date {1}", changed, fromToken);
+        LOG.info("{0} user(s) changed in SAP from date {1}", changed, fromToken);
     }
 
     @Override
@@ -1115,7 +1260,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             Calendar now = new GregorianCalendar();
             now.set(Calendar.MILLISECOND, 0); // we don't have milisecond precision from SAP in LASTMODIFIED
             SyncToken syncToken = new SyncToken(now.getTime().getTime());
-            LOG.ok("returning SyncToken: {0} ({1})", syncToken, now);
+            LOG.info("returning SyncToken: {0} ({1})", syncToken, now);
             return syncToken;
 
         } else {
@@ -1140,7 +1285,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         }
         Process process;
         try {
-            LOG.ok("Executing ''{0}''", command);
+            LOG.info("Executing ''{0}''", command);
             process = pb.start();
         } catch (IOException e) {
             LOG.error("Execution of ''{0}'' failed (exec): {1} ({2})", command, e.getMessage(), e.getClass());
@@ -1148,12 +1293,51 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         }
         try {
             int exitCode = process.waitFor();
-            LOG.ok("Execution of ''{0}'' finished, exit code {1}", command, exitCode);
+            LOG.info("Execution of ''{0}'' finished, exit code {1}", command, exitCode);
             return exitCode;
         } catch (InterruptedException e) {
             LOG.error("Execution of ''{0}'' failed (waitFor): {1} ({2})", command, e.getMessage(), e.getClass());
             throw new ConnectionBrokenException(e.getMessage(), e);
         }
+    }
+
+    private String generateTempPassword (){
+        JCoFunction function = null;
+        try {
+            function = destination.getRepository().getFunction("SUSR_GENERATE_PASSWORD");
+            executeFunction(function);
+            String pwd = function.getExportParameterList().getString("PASSWORD");
+            return pwd;
+        } catch (Exception e) {
+            LOG.warn("Using hardcoded temp password: " + e);
+            return "S&r7tP(%s";
+        }
+    }
+
+    private boolean isPasswordAlreadySet(String userName, String password) throws JCoException {
+        JCoFunction function = destination.getRepository().getFunction("SUSR_LOGIN_CHECK_RFC");
+        if (function == null)
+            throw new RuntimeException("SUSR_LOGIN_CHECK_RFC not found in SAP.");
+        function.getImportParameterList().setValue("BNAME", userName);
+        function.getImportParameterList().setValue("PASSWORD", password);
+
+        try {
+            function.execute(destination);
+        } catch (JCoException e) {
+            if (e.getGroup()==126 && "152".equalsIgnoreCase(e.getMessageNumber())) {
+                // (126) WRONG_PASSWORD: WRONG_PASSWORD Message 152 of class 00 type E
+                return false;
+            } else if (e.getGroup()==126 && "20".equalsIgnoreCase(e.getMessageNumber())){
+                // (126) NO_CHECK_FOR_THIS_USER: NO_CHECK_FOR_THIS_USER Message 200 of class 00 type E
+                throw new PermissionDeniedException("Password logon no longer possible - too many failed attempts: "+e, e);
+            } else {
+                LOG.error(e, "new exception type, how to handle? "+e);
+                throw e;
+            }
+        }
+
+        return true;
+
     }
 
 }

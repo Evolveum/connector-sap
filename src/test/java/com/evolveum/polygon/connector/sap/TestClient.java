@@ -27,13 +27,13 @@ public class TestClient {
     private static final Log LOG = Log.getLog(TestClient.class);
 
     static final ObjectClass ACCOUNT_OBJECT_CLASS = new ObjectClass(ObjectClass.ACCOUNT_NAME);
-    static final String[] MINIMAL_ACCOUNT_ATTRIBUTE_LIST = {"ACTIVITYGROUPS", "LOGONDATA.GLTGB", "ADDRESS.TITLE_P",
+    static final String[] MINIMAL_ACCOUNT_ATTRIBUTE_LIST = {SapConnector.ACTIVITYGROUPS, "LOGONDATA.GLTGB", "ADDRESS.TITLE_P",
             "ADDRESS.FIRSTNAME", "ADDRESS.LASTNAME", "ADDRESS.TITLE_ACA1", "ADDRESS.E_MAIL", "ADDRESS.TEL1_EXT",
             "ADDRESS.TEL1_NUMBR", "ADDRESS.FAX_NUMBER", "ADDRESS.FAX_EXTENS", "ADDRESS.ROOM_NO_P", "ADDRESS.DEPARTMENT",
             "ADDRESS.COMM_TYPE", "ADDRESS.COUNTRY", "ADDRESS.LANGU_P", "ADDRESS.LANGU_ISO", "DEFAULTS.SPLD",
             "UCLASS.LIC_TYPE", "UCLASS.SYSID", "UCLASS.CLIENT", "UCLASS.BNAME_CHARGEABLE", "LOGONDATA.GLTGV"};
 
-    static final String USER_NAME = "evolveum";
+    static final String USER_NAME = "Evolveum";
 
     @BeforeClass
     public static void setUp() throws Exception {
@@ -300,7 +300,7 @@ public class TestClient {
         attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, enable));
 
         String activityGroup = "ZBC_ADM_BENUTZERADMINISTRATOR|2005-03-02|9999-12-31";
-        attributes.add(AttributeBuilder.build("ACTIVITYGROUPS", activityGroup));
+        attributes.add(AttributeBuilder.build(SapConnector.ACTIVITYGROUPS, activityGroup));
 
         Date enableDate = new GregorianCalendar(2016, 1, 1).getTime();
         Date disableDate = new GregorianCalendar(2016, 2, 31).getTime();
@@ -355,7 +355,7 @@ public class TestClient {
         // special attributes
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.ENABLE_NAME).getValue().get(0), enable);
 
-        Assert.assertEquals(user.getAttributeByName("ACTIVITYGROUPS").getValue().get(0), activityGroup);
+        Assert.assertEquals(user.getAttributeByName(SapConnector.ACTIVITYGROUPS).getValue().get(0), activityGroup);
 
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.ENABLE_DATE_NAME).getValue().get(0), enableDate.getTime());
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.DISABLE_DATE_NAME).getValue().get(0), disableDate.getTime());
@@ -417,7 +417,7 @@ public class TestClient {
         attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, enable));
 
         String activityGroup = "ZBC_ADM_ENTWICKLER_ANZEIGE|2006-01-01|2020-12-31";
-        attributes.add(AttributeBuilder.build("ACTIVITYGROUPS", activityGroup));
+        attributes.add(AttributeBuilder.build(SapConnector.ACTIVITYGROUPS, activityGroup));
 
         Date enableDate = new GregorianCalendar(2016, 0, 1).getTime();
         Date disableDate = new GregorianCalendar(2017, 12, 31).getTime();
@@ -444,7 +444,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        Assert.assertTrue(user != null, "Created user " + USER_NAME + " not found");
+        Assert.assertTrue(user != null, "User " + USER_NAME + " not found");
 
         Assert.assertEquals(user.getAttributeByName("ADDRESS.TITLE_P").getValue().get(0), title);
         Assert.assertEquals(user.getAttributeByName("ADDRESS.FIRSTNAME").getValue().get(0), firstName);
@@ -473,10 +473,43 @@ public class TestClient {
         // special attributes
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.ENABLE_NAME).getValue().get(0), enable);
 
-        Assert.assertEquals(user.getAttributeByName("ACTIVITYGROUPS").getValue().get(0), activityGroup);
+        Assert.assertEquals(user.getAttributeByName(SapConnector.ACTIVITYGROUPS).getValue().get(0), activityGroup);
 
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.ENABLE_DATE_NAME).getValue().get(0), enableDate.getTime());
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.DISABLE_DATE_NAME).getValue().get(0), disableDate.getTime());
+    }
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testDeleteAcitivtyGroups() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        // empty activity group
+        attributes.add(AttributeBuilder.build(SapConnector.ACTIVITYGROUPS));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info("ACTIVITYGROUPS: {0}", user.getAttributeByName(SapConnector.ACTIVITYGROUPS).getValue());
+        Assert.assertEquals(user.getAttributeByName(SapConnector.ACTIVITYGROUPS).getValue().size(), 0);
     }
 
     @Test(dependsOnMethods = {"testCreateFull"})
@@ -501,7 +534,7 @@ public class TestClient {
         // checked in testUpdateFull
     }
 
-    @Test(dependsOnMethods = {"testCreateFull"})
+    @Test//(dependsOnMethods = {"testCreateFull"})
     public void testChangePassword() throws IOException {
         Set<Attribute> attributes = new HashSet<Attribute>();
         attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
@@ -557,4 +590,87 @@ public class TestClient {
         Assert.assertTrue(count[0] > 0, "Find all roles return zero lines");
     }
 
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testUpdateSpecialAttributes() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String township = "test";
+        String alias = "ALIAS";
+        attributes.add(AttributeBuilder.build("ADDRESS.TOWNSHIP", township));
+        attributes.add(AttributeBuilder.build("ALIAS.USERALIAS", alias));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        Assert.assertTrue(user != null, "Created user " + USER_NAME + " not found");
+
+        // TOWNSHIP is not updateable
+        String townshipOriginal = "";
+        Assert.assertEquals(user.getAttributeByName("ADDRESS.TOWNSHIP").getValue().get(0), townshipOriginal);
+
+        // alias is updateable over ALIASX.BAPIALIAS
+        Assert.assertEquals(user.getAttributeByName("ALIAS.USERALIAS").getValue().get(0), alias);
+
+    }
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testIsPasswordAlreadySet() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String township = "test";
+        String alias = "ALIAS";
+        attributes.add(AttributeBuilder.build("ADDRESS.TOWNSHIP", township));
+        attributes.add(AttributeBuilder.build("ALIAS.USERALIAS", alias));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        Assert.assertTrue(user != null, "Created user " + USER_NAME + " not found");
+
+        // TOWNSHIP is not updateable
+        String townshipOriginal = "";
+        Assert.assertEquals(user.getAttributeByName("ADDRESS.TOWNSHIP").getValue().get(0), townshipOriginal);
+
+        // alias is updateable over ALIASX.BAPIALIAS
+        Assert.assertEquals(user.getAttributeByName("ALIAS.USERALIAS").getValue().get(0), alias);
+
+    }
 }

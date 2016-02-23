@@ -41,25 +41,6 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private GuardedString password;
 
-    @Override
-    public String toString() {
-        return "SapConfiguration{" +
-                "host='" + host + '\'' +
-                ", port='" + port + '\'' +
-                ", user='" + user + '\'' +
-                ", systemId='" + systemId + '\'' +
-                ", systemNumber='" + systemNumber + '\'' +
-                ", client='" + client + '\'' +
-                ", lang='" + lang + '\'' +
-                ", failWhenTruncating=" + failWhenTruncating +
-                ", failWhenWarning=" + failWhenWarning +
-                ", useTransaction=" + useTransaction +
-                ", activityGroupsWithDates=" + activityGroupsWithDates +
-                ", testBapiFunctionPermission=" + testBapiFunctionPermission +
-                ", tables=" + Arrays.toString(tables) +
-                '}';
-    }
-
     private String systemId; //r3Name
 
     private String systemNumber = "00";
@@ -72,11 +53,13 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private Boolean failWhenWarning = false;
 
-    private Boolean useTransaction = false;
+    private Boolean useTransaction = true;
 
     private Boolean activityGroupsWithDates = false;
 
     private Boolean testBapiFunctionPermission = true;
+
+    private Boolean changePasswordAtNextLogon = false;
 
     private String[] tables;
 
@@ -154,6 +137,26 @@ public class SapConfiguration extends AbstractConfiguration {
                 tableKeys.put(tableName, keys);
             }
         }
+    }
+
+    @Override
+    public String toString() {
+        return "SapConfiguration{" +
+                "host='" + host + '\'' +
+                ", port='" + port + '\'' +
+                ", user='" + user + '\'' +
+                ", systemId='" + systemId + '\'' +
+                ", systemNumber='" + systemNumber + '\'' +
+                ", client='" + client + '\'' +
+                ", lang='" + lang + '\'' +
+                ", failWhenTruncating=" + failWhenTruncating +
+                ", failWhenWarning=" + failWhenWarning +
+                ", useTransaction=" + useTransaction +
+                ", activityGroupsWithDates=" + activityGroupsWithDates +
+                ", testBapiFunctionPermission=" + testBapiFunctionPermission +
+                ", tables=" + Arrays.toString(tables) +
+                ", changePasswordAtNextLogon=" + changePasswordAtNextLogon +
+                '}';
     }
 
     @ConfigurationProperty(displayMessageKey = "sap.config.host",
@@ -290,7 +293,6 @@ public class SapConfiguration extends AbstractConfiguration {
         this.testBapiFunctionPermission = testBapiFunctionPermission;
     }
 
-
     @ConfigurationProperty(displayMessageKey = "sap.config.tables",
             helpMessageKey = "sap.config.tables.help")
     public String[] getTables() {
@@ -299,6 +301,17 @@ public class SapConfiguration extends AbstractConfiguration {
 
     public void setTables(String[] tables) {
         this.tables = tables;
+    }
+
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.changePasswordAtNextLogon",
+            helpMessageKey = "sap.config.changePasswordAtNextLogon.help")
+    public Boolean getChangePasswordAtNextLogon() {
+        return changePasswordAtNextLogon;
+    }
+
+    public void setChangePasswordAtNextLogon(Boolean changePasswordAtNextLogon) {
+        this.changePasswordAtNextLogon = changePasswordAtNextLogon;
     }
 
     private String getPlainPassword() {

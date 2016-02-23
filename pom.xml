@@ -28,7 +28,7 @@
 
     <groupId>com.evolveum.polygon</groupId>
     <artifactId>connector-sap</artifactId>
-    <version>0.9.0.0-SNAPSHOT</version>
+    <version>0.9.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>SAP</name>
@@ -73,18 +73,21 @@
     </build>
 
     <dependencies>
+        <!-- first please install jco to local maven repository, for example:
+            mvn install:install-file -Dfile="fathTo\sapjco3-NTAMD64-3.0.13\sapjco3.jar" -DgroupId=com.sap.conn.jco -DartifactId=sapjco -Dversion=3.0.13 -Dpackaging=jar
+        -->
+        <dependency>
+            <groupId>com.sap.conn.jco</groupId>
+            <artifactId>sapjco</artifactId>
+            <version>3.0.13</version>
+        </dependency>
         <!--
         <dependency>
             <groupId>com.sap.conn.jco</groupId>
             <artifactId>sapjco</artifactId>
             <version>3.0.13</version>
-        </dependency>-->
-        <dependency>
-            <groupId>com.sap.conn.jco</groupId>
-            <artifactId>sapjco</artifactId>
-            <version>3.0.13</version>
             <scope>system</scope>
-            <systemPath>d:\Data\Evolveum\klienti\WWK\SAP connector\lib\sapjco3-NTAMD64-3.0.13\sapjco3.jar</systemPath>
-        </dependency>
+            <systemPath>fullPathTo\sapjco3-NTAMD64-3.0.13\sapjco3.jar</systemPath>
+        </dependency> -->
     </dependencies>
 </project>
