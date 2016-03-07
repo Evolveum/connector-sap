@@ -22,13 +22,13 @@
     <parent>
         <artifactId>connector-parent</artifactId>
         <groupId>com.evolveum.polygon</groupId>
-        <version>1.0-SNAPSHOT</version>
+        <version>1.4.2.0</version>
         <relativePath></relativePath>
     </parent>
 
     <groupId>com.evolveum.polygon</groupId>
     <artifactId>connector-sap</artifactId>
-    <version>0.9.1.0-SNAPSHOT</version>
+    <version>0.9.2.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>SAP</name>
@@ -73,21 +73,29 @@
     </build>
 
     <dependencies>
+        <!--
+        <dependency>
+            <groupId>commons-lang</groupId>
+            <artifactId>commons-lang</artifactId>
+            <version>2.6</version>
+        </dependency>-->
+
+
         <!-- first please install jco to local maven repository, for example:
-            mvn install:install-file -Dfile="fathTo\sapjco3-NTAMD64-3.0.13\sapjco3.jar" -DgroupId=com.sap.conn.jco -DartifactId=sapjco -Dversion=3.0.13 -Dpackaging=jar
+            mvn install:install-file -Dfile="pathTo\sapjco3-NTAMD64-3.0.13\sapjco3.jar" -DgroupId=com.sap.conn.jco -DartifactId=sapjco -Dversion=3.0.13 -Dpackaging=jar
         -->
         <dependency>
             <groupId>com.sap.conn.jco</groupId>
             <artifactId>sapjco</artifactId>
+            <scope>provided</scope> <!-- exclude sapjco3.jar-->
             <version>3.0.13</version>
         </dependency>
-        <!--
-        <dependency>
-            <groupId>com.sap.conn.jco</groupId>
-            <artifactId>sapjco</artifactId>
-            <version>3.0.13</version>
-            <scope>system</scope>
-            <systemPath>fullPathTo\sapjco3-NTAMD64-3.0.13\sapjco3.jar</systemPath>
-        </dependency> -->
+        <!--<dependency>-->
+            <!--<groupId>com.sap.conn.jco</groupId>-->
+            <!--<artifactId>sapjco</artifactId>-->
+            <!--<version>3.0.13</version>-->
+            <!--<scope>system</scope>-->
+            <!--<systemPath>sapjco3.jar</systemPath>-->
+        <!--</dependency>-->
     </dependencies>
 </project>

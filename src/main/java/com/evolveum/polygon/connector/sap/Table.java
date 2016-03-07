@@ -20,75 +20,80 @@ import com.sap.conn.jco.JCoTable;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
 import org.identityconnectors.framework.common.objects.Attribute;
+import org.xml.sax.SAXException;
 
-import java.text.ParseException;
-import java.util.Date;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.TransformerException;
+import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 
 /**
- * Created by gpalos on 21. 1. 2016.
+ * Created by gpalos on 2. 3. 2016.
  */
-public class ActivityGroups {
-    private static final Log LOG = Log.getLog(ActivityGroups.class);
+public class Table {
+    private static final Log LOG = Log.getLog(Table.class);
 
-    List<ActivityGroup> values = new LinkedList<ActivityGroup>();
+    List<Item> values = new LinkedList<Item>();
 
-    // if ActivityGroups not null, modify
+    // if Table is not null, modify
     boolean modify = false;
 
-    public ActivityGroups(JCoTable agt) {
+    public Table(JCoTable agt) throws TransformerException, ParserConfigurationException {
         agt.firstRow();
         if (agt.getNumRows() > 0) {
             do {
-                String name = (String) agt.getValue("AGR_NAME");
-                Date from = (Date) agt.getValue("FROM_DAT");
-                Date to = (Date) agt.getValue("TO_DAT");
+                Item item = new Item(agt);
 
-                ActivityGroup ag = new ActivityGroup(name, from, to);
-
-                values.add(ag);
+                values.add(item);
             } while (agt.nextRow());
         }
     }
 
-    public ActivityGroups(Set<Attribute> attributes, String attrName) throws ParseException {
-        List<Object> activityGroups = null;
+    public Table(Set<Attribute> attributes, String attrName) throws IOException, SAXException, ParserConfigurationException {
+        List<Object> items = null;
         for (Attribute attr : attributes) {
-            if (attrName.equals(attr.getName())) {
+            if (attr.getName().startsWith(attrName)) {
                 modify = true;
-                activityGroups = attr.getValue();
-                if (activityGroups != null) {
-                    for (int i = 0; i < activityGroups.size(); i++) {
-                        String activityGroup = (String) activityGroups.get(i);
-                        if (activityGroup == null) {
+                items = attr.getValue();
+                if (items != null) {
+                    for (int i = 0; i < items.size(); i++) {
+                        String item = (String) items.get(i);
+                        if (item == null) {
                             throw new InvalidAttributeValueException("Value " + null + " must be not null for attribute " + attrName);
                         }
-
-                        ActivityGroup ag = new ActivityGroup(activityGroup);
-                        this.values.add(ag);
+                        boolean isXml = item.startsWith("<?xml");
+                        this.values.add(new Item(item, isXml, attrName));
                     }
                 }
             }
         }
 
-        LOG.ok("activityGroups in input: {0}, in output: {1}, modify: {2} ", activityGroups, values, modify);
+        LOG.ok("items in input: {0}, in output: {1}, modify: {2} for attribute {3}", items, values, modify, attrName);
 
     }
 
 
-    public List<String> getValues(boolean withDates) {
+    public List<String> getXmls() {
         List<String> ret = new LinkedList<String>();
         for (int i = 0; i < values.size(); i++) {
-            ret.add(values.get(i).getValue(withDates));
+            ret.add(values.get(i).getData());
+        }
+        return ret;
+    }
+
+    public List<String> getIds(String attribute) {
+        List<String> ret = new LinkedList<String>();
+        for (int i = 0; i < values.size(); i++) {
+            ret.add(values.get(i).getByAttribute(attribute));
         }
         return ret;
     }
 
     @Override
     public String toString() {
-        return "ActivityGroups{" +
+        return "Table{" +
                 "modify=" + modify +
                 ", values=" + values +
                 '}';

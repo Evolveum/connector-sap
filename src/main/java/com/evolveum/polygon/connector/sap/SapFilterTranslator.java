@@ -39,7 +39,7 @@ public class SapFilterTranslator extends AbstractFilterTranslator<SapFilter> {
         }
 
         Attribute attr = filter.getAttribute();
-        LOG.ok("attr.getName:  {0}, attr.getValue: {1}, Uid.NAME: {2}, Name.NAME: {3}", attr.getName(), attr.getValue(), Uid.NAME, Name.NAME);
+        LOG.ok("attr.getId:  {0}, attr.getValue: {1}", attr.getName(), attr.getValue());
         // filter by NAME is the same as by UID
         if (Name.NAME.equals(attr.getName()) || Uid.NAME.equals(attr.getName())) {
             if (attr.getValue() != null && attr.getValue().get(0) != null) {
@@ -61,7 +61,7 @@ public class SapFilterTranslator extends AbstractFilterTranslator<SapFilter> {
         }
 
         Attribute attr = filter.getAttribute();
-        LOG.ok("attr.getName:  {0}, attr.getValue: {1}", attr.getName(), attr.getValue());
+        LOG.ok("attr.getId:  {0}, attr.getValue: {1}", attr.getName(), attr.getValue());
         if (Name.NAME.equals(attr.getName())) {
             if (attr.getValue() != null && attr.getValue().get(0) != null) {
                 SapFilter lf = new SapFilter();
@@ -72,4 +72,13 @@ public class SapFilterTranslator extends AbstractFilterTranslator<SapFilter> {
 
         return null;            // not supported
     }
+
+//    protected T createAndExpression(T leftExpression, T rightExpression) {
+//        return null;
+//    }
+//
+//    protected T createOrExpression(T leftExpression, T rightExpression) {
+//        return null;
+//    }
+
 }

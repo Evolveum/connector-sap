@@ -1,5 +1,6 @@
 package com.evolveum.polygon.connector.sap;
 
+import com.sap.conn.jco.JCoException;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.exceptions.UnknownUidException;
@@ -8,7 +9,9 @@ import org.testng.Assert;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
+import org.xml.sax.SAXException;
 
+import javax.xml.parsers.ParserConfigurationException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.rmi.RemoteException;
@@ -77,15 +80,16 @@ public class TestClient {
         if (properties.containsKey("useTransaction")) {
             sapConfiguration.setUseTransaction(Boolean.parseBoolean(properties.getProperty("useTransaction")));
         }
-        if (properties.containsKey("activityGroupsWithDates")) {
-            sapConfiguration.setActivityGroupsWithDates(Boolean.parseBoolean(properties.getProperty("activityGroupsWithDates")));
-        }
         if (properties.containsKey("testBapiFunctionPermission")) {
             sapConfiguration.setTestBapiFunctionPermission(Boolean.parseBoolean(properties.getProperty("testBapiFunctionPermission")));
         }
         if (properties.containsKey("tables")) {
-            String[] tables = {properties.getProperty("tables")};
+            String[] tables = properties.getProperty("tables").split(";");
             sapConfiguration.setTables(tables);
+        }
+        if (properties.containsKey("tableParameterNames")) {
+            String[] tableParameterNames = properties.getProperty("tableParameterNames").split(";");
+            sapConfiguration.setTableParameterNames(tableParameterNames);
         }
 
 
@@ -143,7 +147,7 @@ public class TestClient {
         };
         OperationOptions options = null;
         sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
-
+        System.out.println("count[0] = " + count[0]);
         Assert.assertTrue(count[0] > 0, "Find all users return zero users");
     }
 
@@ -167,6 +171,18 @@ public class TestClient {
 
         Assert.assertTrue(count[0] == pageSize, "Find " + pageSize + " users return " + count[0] + " users");
     }
+    @Test
+    public void testCreateMinimal() throws RemoteException {
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+        GuardedString password = new GuardedString("Test1234".toCharArray());
+        attributes.add(AttributeBuilder.build(OperationalAttributes.PASSWORD_NAME, password));
+
+        OperationOptions operationOptions = null;
+        sapConnector.create(ACCOUNT_OBJECT_CLASS, attributes, operationOptions);
+
+        testFindUser();
+    }
 
     @Test(dependsOnMethods = {"testCreateFull"})
     public void testFindUser() throws RemoteException {
@@ -186,7 +202,7 @@ public class TestClient {
         Assert.assertTrue(found[0], "User " + USER_NAME + " not found");
     }
 
-    @Test(dependsOnMethods = {"testCreateFull"})
+    @Test(dependsOnMethods = {"testCreateMinimal"})
     public void testFindContains() throws RemoteException {
         SapFilter query = new SapFilter();
         query.setByNameContains("volv"); // evolveum
@@ -204,27 +220,25 @@ public class TestClient {
         Assert.assertTrue(found[0], "User containing " + query.getByNameContains() + " not found");
     }
 
-/*    @Test
-    public void testCreateMinimal() throws RemoteException {
-        Set<Attribute> attributes = new HashSet<Attribute>();
-        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
-        GuardedString password = new GuardedString("Test1234".toCharArray());
-        attributes.add(AttributeBuilder.build(OperationalAttributes.PASSWORD_NAME, password));
-
-        OperationOptions operationOptions = null;
-        sapConnector.create(ACCOUNT_OBJECT_CLASS, attributes, operationOptions);
-
-        testFindUser();
-    }*/
-
-    @Test(dependsOnMethods = {"testCreateFull"})
+    @Test(dependsOnMethods = {"testCreateMinimal"})
     public void testDelete() throws RemoteException {
         OperationOptions operationOptions = null;
         sapConnector.delete(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), operationOptions);
 
         boolean deleted = false;
         try {
-            testFindUser();
+            SapFilter query = new SapFilter();
+            query.setByName(USER_NAME);
+            final boolean[] found = {false};
+            ResultsHandler handler = new ResultsHandler() {
+                @Override
+                public boolean handle(ConnectorObject connectorObject) {
+                    found[0] = true;
+                    return true; // continue
+                }
+            };
+            OperationOptions options = null;
+            sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
         } catch (UnknownUidException e) {
             deleted = true;
         }
@@ -232,24 +246,8 @@ public class TestClient {
         Assert.assertTrue(deleted, "User " + USER_NAME + " was not deleted");
     }
 
-    @Test
-    public void testParseActivityGroups() throws RemoteException, ParseException {
-        String activityGroupName = "ACTIVITYGROUP_NAME";
-        ActivityGroup ag = new ActivityGroup(activityGroupName);
 
-        Assert.assertEquals(ag.getName(), activityGroupName, "expected: " + activityGroupName + ", parsed as: " + ag.getName());
-
-        String from = "2005-03-02";
-        String to = "9999-12-31";
-        String activityGroupWithDates = activityGroupName + "|" + from + "|" + to;
-        ActivityGroup agwd = new ActivityGroup(activityGroupWithDates);
-
-        Assert.assertEquals(agwd.getName(), activityGroupName, "expected: " + activityGroupName + ", parsed as: " + agwd.getName());
-        Assert.assertEquals(agwd.getFrom(), from, "expected: " + from + ", parsed as: " + agwd.getFrom());
-        Assert.assertEquals(agwd.getTo(), to, "expected: " + to + ", parsed as: " + agwd.getTo());
-    }
-
-    @Test
+    @Test(dependsOnMethods = {"testDelete"})
     public void testCreateFull() throws RemoteException {
         Set<Attribute> attributes = new HashSet<Attribute>();
         attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
@@ -299,8 +297,8 @@ public class TestClient {
         boolean enable = false;
         attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, enable));
 
-        String activityGroup = "ZBC_ADM_BENUTZERADMINISTRATOR|2005-03-02|9999-12-31";
-        attributes.add(AttributeBuilder.build(SapConnector.ACTIVITYGROUPS, activityGroup));
+        String activityGroup = "ZBC_ADM_BENUTZERADMINISTRATOR";
+        attributes.add(AttributeBuilder.build(SapConnector.ACTIVITYGROUPS__ARG_NAME, activityGroup));
 
         Date enableDate = new GregorianCalendar(2016, 1, 1).getTime();
         Date disableDate = new GregorianCalendar(2016, 2, 31).getTime();
@@ -348,14 +346,15 @@ public class TestClient {
         Assert.assertEquals(user.getAttributeByName("DEFAULTS.SPLD").getValue().get(0), spld);
 
         Assert.assertEquals(user.getAttributeByName("UCLASS.LIC_TYPE").getValue().get(0), licType);
-        Assert.assertEquals(user.getAttributeByName("UCLASS.SYSID").getValue().get(0), "");
-        Assert.assertEquals(user.getAttributeByName("UCLASS.CLIENT").getValue().get(0), "");
-        Assert.assertEquals(user.getAttributeByName("UCLASS.BNAME_CHARGEABLE").getValue().get(0), "");
+        // empty not send
+//        Assert.assertEquals(user.getAttributeByName("UCLASS.SYSID").getValue().get(0), "");
+//        Assert.assertEquals(user.getAttributeByName("UCLASS.CLIENT").getValue().get(0), "");
+//        Assert.assertEquals(user.getAttributeByName("UCLASS.BNAME_CHARGEABLE").getValue().get(0), "");
 
         // special attributes
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.ENABLE_NAME).getValue().get(0), enable);
 
-        Assert.assertEquals(user.getAttributeByName(SapConnector.ACTIVITYGROUPS).getValue().get(0), activityGroup);
+        Assert.assertEquals(user.getAttributeByName(SapConnector.ACTIVITYGROUPS__ARG_NAME).getValue().get(0), activityGroup);
 
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.ENABLE_DATE_NAME).getValue().get(0), enableDate.getTime());
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.DISABLE_DATE_NAME).getValue().get(0), disableDate.getTime());
@@ -416,8 +415,8 @@ public class TestClient {
         boolean enable = true;
         attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, enable));
 
-        String activityGroup = "ZBC_ADM_ENTWICKLER_ANZEIGE|2006-01-01|2020-12-31";
-        attributes.add(AttributeBuilder.build(SapConnector.ACTIVITYGROUPS, activityGroup));
+        String activityGroup = "ZBC_ADM_ENTWICKLER_ANZEIGE";
+        attributes.add(AttributeBuilder.build(SapConnector.ACTIVITYGROUPS__ARG_NAME, activityGroup));
 
         Date enableDate = new GregorianCalendar(2016, 0, 1).getTime();
         Date disableDate = new GregorianCalendar(2017, 12, 31).getTime();
@@ -457,7 +456,7 @@ public class TestClient {
         Assert.assertEquals(user.getAttributeByName("ADDRESS.FAX_EXTENS").getValue().get(0), faxExtens);
         Assert.assertEquals(user.getAttributeByName("ADDRESS.ROOM_NO_P").getValue().get(0), room);
         Assert.assertEquals(user.getAttributeByName("ADDRESS.DEPARTMENT").getValue().get(0), department);
-        Assert.assertEquals(user.getAttributeByName("ADDRESS.COMM_TYPE").getValue().get(0), commType);
+        Assert.assertEquals(user.getAttributeByName("ADDRESS.COMM_TYPE"), null); // empty is null
 //        Assert.assertEquals(user.getAttributeByName("ADDRESS.COUNTRY").getValue().get(0), country);
         Assert.assertEquals(user.getAttributeByName("ADDRESS.LANGU_P").getValue().get(0), languP);
 //        Assert.assertEquals(user.getAttributeByName("ADDRESS.LANGU_ISO").getValue().get(0), languIso);
@@ -473,13 +472,220 @@ public class TestClient {
         // special attributes
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.ENABLE_NAME).getValue().get(0), enable);
 
-        Assert.assertEquals(user.getAttributeByName(SapConnector.ACTIVITYGROUPS).getValue().get(0), activityGroup);
+        Assert.assertEquals(user.getAttributeByName(SapConnector.ACTIVITYGROUPS__ARG_NAME).getValue().get(0), activityGroup);
 
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.ENABLE_DATE_NAME).getValue().get(0), enableDate.getTime());
         Assert.assertEquals(user.getAttributeByName(OperationalAttributes.DISABLE_DATE_NAME).getValue().get(0), disableDate.getTime());
     }
 
+    @Test(dependsOnMethods = {"testEnableUser"})
+    public void testDisableUser() throws RemoteException {
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+        attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, false));
+
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+        // checked in testCreateFull
+    }
+
     @Test(dependsOnMethods = {"testCreateFull"})
+    public void testEnableUser() throws RemoteException {
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+        attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, true));
+
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+        // checked in testUpdateFull
+    }
+
+    @Test(dependsOnMethods = {"testEnableUser"})
+    public void testChangePassword() throws IOException {
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+        String newPassword = "Test5678";
+        GuardedString password = new GuardedString(newPassword.toCharArray());
+        attributes.add(AttributeBuilder.build(OperationalAttributes.PASSWORD_NAME, password));
+
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        String fileName = "testChangePass.properties";
+        SapConfiguration sapConf = null;
+        sapConf = readSapConfigurationFromFile(fileName);
+        SapConnector sapConn = new SapConnector();
+        try {
+            sapConn.init(sapConf);
+            sapConn.test();
+        } catch (Exception e)
+        {
+            // authentificated, but don't have privileges
+            if (!e.toString().contains("No RFC authorization for function module RFCPING")) {
+                throw e;
+            }
+        }
+    }
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testSync() throws IOException {
+        SyncToken syncToken = sapConnector.getLatestSyncToken(ACCOUNT_OBJECT_CLASS);
+        testChangePassword();
+        final boolean[] changeDetected = {false};
+        SyncResultsHandler syncResultsHandler = new SyncResultsHandler() {
+            @Override
+            public boolean handle(SyncDelta syncDelta) {
+                System.out.println("syncDelta = " + syncDelta);
+                changeDetected[0] = true;
+                return true;
+            }
+        };
+        sapConnector.sync(ACCOUNT_OBJECT_CLASS, syncToken, syncResultsHandler, null);
+
+        Assert.assertEquals(changeDetected[0], true);
+    }
+
+    @Test
+    public void testFindAllActivityGroups() throws RemoteException {
+        SapFilter query = null;
+        final int[] count = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                System.out.println("connectorObject = " + connectorObject);
+                count[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        ObjectClass objectClass = new ObjectClass("ACTIVITYGROUP");
+        sapConnector.executeQuery(objectClass, query, handler, options);
+        LOG.info("count: "+count[0]);
+        Assert.assertTrue(count[0] > 0, "Find all roles return zero lines");
+    }
+
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testAliasAndReadOnlyAttribute() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String township = "read_only";
+        String alias = "ALIAS";
+        attributes.add(AttributeBuilder.build("ADDRESS.TOWNSHIP", township));
+        attributes.add(AttributeBuilder.build("ALIAS.USERALIAS", alias));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        Assert.assertTrue(user != null, "Created user " + USER_NAME + " not found");
+
+        // TOWNSHIP is not updateable
+        String townshipOriginal = "";
+        Assert.assertEquals(user.getAttributeByName("ADDRESS.TOWNSHIP"), null);
+
+        // alias is updateable over ALIASX.BAPIALIAS
+        Assert.assertEquals(user.getAttributeByName("ALIAS.USERALIAS").getValue().get(0), alias);
+
+    }
+
+    @Test
+    public void testParseItemFromXml() throws IOException, SAXException, ParserConfigurationException {
+        String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?><item><AGR_NAME>ZBC_ADM_BATCH_ADMIN</AGR_NAME><FROM_DAT>2010-03-25</FROM_DAT><TO_DAT>9999-12-31</TO_DAT><AGR_TEXT>Background Processing Administrator</AGR_TEXT><ORG_FLAG/></item>";
+        Item item = new Item(xml, true, "ACTIVITYGROUPS");
+        System.out.println("item = " + item.getData());
+        System.out.println("item.getByAttribute(\"BAPIPROF\") = " + item.getByAttribute("BAPIPROF"));
+    }
+
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testSetSimpleAcitivtyGroups() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String activityGroup = "ZBC_ADM_ENTWICKLER_ANZEIGE";
+        String attribute = SapConnector.ACTIVITYGROUPS__ARG_NAME;
+        attributes.add(AttributeBuilder.build(attribute, activityGroup));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), activityGroup);
+    }
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testSetXmlAcivityGroups() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String activityGroup = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?><item><AGR_NAME>ZBC_ADM_BATCH_ADMIN</AGR_NAME><FROM_DAT>2010-03-25</FROM_DAT><TO_DAT>9999-12-31</TO_DAT><AGR_TEXT>Background Processing Administrator</AGR_TEXT><ORG_FLAG/></item>";
+        String attribute = SapConnector.ACTIVITYGROUPS;
+        attributes.add(AttributeBuilder.build(attribute, activityGroup));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), activityGroup);
+    }
+
+
+    @Test(dependsOnMethods = {"testSetXmlAcivityGroups"})
     public void testDeleteAcitivtyGroups() throws RemoteException {
 
         Set<Attribute> attributes = new HashSet<Attribute>();
@@ -512,67 +718,8 @@ public class TestClient {
         Assert.assertEquals(user.getAttributeByName(SapConnector.ACTIVITYGROUPS).getValue().size(), 0);
     }
 
-    @Test(dependsOnMethods = {"testCreateFull"})
-    public void testDisableUser() throws RemoteException {
-        Set<Attribute> attributes = new HashSet<Attribute>();
-        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
-        attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, false));
-
-        OperationOptions operationOptions = null;
-        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
-        // checked in testCreateFull
-    }
-
-    @Test(dependsOnMethods = {"testCreateFull"})
-    public void testEnableUser() throws RemoteException {
-        Set<Attribute> attributes = new HashSet<Attribute>();
-        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
-        attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, true));
-
-        OperationOptions operationOptions = null;
-        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
-        // checked in testUpdateFull
-    }
-
-    @Test//(dependsOnMethods = {"testCreateFull"})
-    public void testChangePassword() throws IOException {
-        Set<Attribute> attributes = new HashSet<Attribute>();
-        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
-        String newPassword = "Test5678";
-        GuardedString password = new GuardedString(newPassword.toCharArray());
-        attributes.add(AttributeBuilder.build(OperationalAttributes.PASSWORD_NAME, password));
-
-        OperationOptions operationOptions = null;
-        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
-
-        String fileName = "testChangePass.properties";
-        SapConfiguration sapConf = null;
-        sapConf = readSapConfigurationFromFile(fileName);
-        SapConnector sapConn = new SapConnector();
-        sapConn.init(sapConf);
-        sapConn.test();
-    }
-
-    @Test(dependsOnMethods = {"testCreateFull"})
-    public void testSync() throws IOException {
-        SyncToken syncToken = sapConnector.getLatestSyncToken(ACCOUNT_OBJECT_CLASS);
-        testChangePassword();
-        final boolean[] changeDetected = {false};
-        SyncResultsHandler syncResultsHandler = new SyncResultsHandler() {
-            @Override
-            public boolean handle(SyncDelta syncDelta) {
-                System.out.println("syncDelta = " + syncDelta);
-                changeDetected[0] = true;
-                return true;
-            }
-        };
-        sapConnector.sync(ACCOUNT_OBJECT_CLASS, syncToken, syncResultsHandler, null);
-
-        Assert.assertEquals(changeDetected[0], true);
-    }
-
     @Test
-    public void testFindAllRoles() throws RemoteException {
+    public void testFindAllProfiles() throws RemoteException {
         SapFilter query = null;
         final int[] count = {0};
         ResultsHandler handler = new ResultsHandler() {
@@ -584,22 +731,22 @@ public class TestClient {
             }
         };
         OperationOptions options = null;
-        ObjectClass objectClass = new ObjectClass("AGR_DEFINE");
+        ObjectClass objectClass = new ObjectClass(SapConnector.PROFILE_NAME);
         sapConnector.executeQuery(objectClass, query, handler, options);
-
-        Assert.assertTrue(count[0] > 0, "Find all roles return zero lines");
+        LOG.info("count: "+count[0]);
+        Assert.assertTrue(count[0] > 0, "Find all profiles return zero lines");
     }
 
+
     @Test(dependsOnMethods = {"testCreateFull"})
-    public void testUpdateSpecialAttributes() throws RemoteException {
+    public void testSetSimpleProfiles() throws RemoteException {
 
         Set<Attribute> attributes = new HashSet<Attribute>();
         attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
 
-        String township = "test";
-        String alias = "ALIAS";
-        attributes.add(AttributeBuilder.build("ADDRESS.TOWNSHIP", township));
-        attributes.add(AttributeBuilder.build("ALIAS.USERALIAS", alias));
+        String profile = "B_ALE_ALL";
+        String attribute = SapConnector.PROFILES_BAPIPROF;
+        attributes.add(AttributeBuilder.build(attribute, profile));
 
         // update it
         OperationOptions operationOptions = null;
@@ -621,27 +768,19 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        Assert.assertTrue(user != null, "Created user " + USER_NAME + " not found");
-
-        // TOWNSHIP is not updateable
-        String townshipOriginal = "";
-        Assert.assertEquals(user.getAttributeByName("ADDRESS.TOWNSHIP").getValue().get(0), townshipOriginal);
-
-        // alias is updateable over ALIASX.BAPIALIAS
-        Assert.assertEquals(user.getAttributeByName("ALIAS.USERALIAS").getValue().get(0), alias);
-
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), profile);
     }
 
     @Test(dependsOnMethods = {"testCreateFull"})
-    public void testIsPasswordAlreadySet() throws RemoteException {
+    public void testSetXmlProfiles() throws RemoteException {
 
         Set<Attribute> attributes = new HashSet<Attribute>();
         attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
 
-        String township = "test";
-        String alias = "ALIAS";
-        attributes.add(AttributeBuilder.build("ADDRESS.TOWNSHIP", township));
-        attributes.add(AttributeBuilder.build("ALIAS.USERALIAS", alias));
+        String profile = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?><item><BAPIPROF>B_ALE_GRP_AD</BAPIPROF><BAPIPTEXT>All Authorizations (W/O Object Maint. in Non-Owner System)</BAPIPTEXT><BAPITYPE>S</BAPITYPE><BAPIAKTPS>A</BAPIAKTPS></item>";
+        String attribute = SapConnector.PROFILES;
+        attributes.add(AttributeBuilder.build(attribute, profile));
 
         // update it
         OperationOptions operationOptions = null;
@@ -663,14 +802,268 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        Assert.assertTrue(user != null, "Created user " + USER_NAME + " not found");
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), profile);
+    }
 
-        // TOWNSHIP is not updateable
-        String townshipOriginal = "";
-        Assert.assertEquals(user.getAttributeByName("ADDRESS.TOWNSHIP").getValue().get(0), townshipOriginal);
 
-        // alias is updateable over ALIASX.BAPIALIAS
-        Assert.assertEquals(user.getAttributeByName("ALIAS.USERALIAS").getValue().get(0), alias);
+    @Test(dependsOnMethods = {"testSetXmlProfiles"})
+    public void testDeleteProfiles() throws RemoteException {
 
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        // empty activity group
+        String attribute = SapConnector.PROFILES_BAPIPROF;
+        attributes.add(AttributeBuilder.build(attribute));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+//        String defaultProfile = "T-E1010108";
+//        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), defaultProfile);
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
+    }
+
+    @Test
+    public void testFindAllGroups() throws RemoteException {
+        SapFilter query = null;
+        final int[] count = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                System.out.println("connectorObject = " + connectorObject);
+                count[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        ObjectClass objectClass = new ObjectClass("GROUP");
+        sapConnector.executeQuery(objectClass, query, handler, options);
+        LOG.info("count: "+count[0]);
+
+        Assert.assertTrue(count[0] > 0, "Find all groups return zero lines");
+    }
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testSetSimpleGroups() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String group = "BLS-AL"; //"SUPER";
+        String attribute = SapConnector.GROUPS_USERGROUP;
+        attributes.add(AttributeBuilder.build(attribute, group));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), group);
+    }
+
+    @Test(dependsOnMethods = {"testSetSimpleGroups"})
+    public void testDeleteGroups() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        // empty group
+        String attribute = SapConnector.GROUPS_USERGROUP;
+        attributes.add(AttributeBuilder.build(attribute));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
+    }
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testSetXmlParameter() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String parameter = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?><item><PARID>BCS_ADMIN_TREE</PARID><PARVA/><PARTXT>BCS Admin: Width of the Navigation Tree</PARTXT></item>";
+        String attribute = "PARAMETER1"; // PARAMETER
+        attributes.add(AttributeBuilder.build(attribute, parameter));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), parameter);
+    }
+
+    @Test(dependsOnMethods = {"testSetXmlParameter"})
+    public void testDeleteParameter() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String attribute = "PARAMETER1";
+        attributes.add(AttributeBuilder.build(attribute));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
+    }
+
+
+    @Test(dependsOnMethods = {"testCreateFull"})
+    public void testSetXmlAddtel() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String addtel = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?><item><COUNTRY>DE</COUNTRY><COUNTRYISO>DE</COUNTRYISO><STD_NO>X</STD_NO><TELEPHONE>089 1234</TELEPHONE><EXTENSION>6789</EXTENSION><TEL_NO>+498912346789</TEL_NO><CALLER_NO>08912346789</CALLER_NO><STD_RECIP/><R_3_USER>1</R_3_USER><HOME_FLAG>X</HOME_FLAG><CONSNUMBER>001</CONSNUMBER><ERRORFLAG/><FLG_NOUSE/><VALID_FROM/><VALID_TO/></item>";
+        String attribute = "ADDTEL";
+        attributes.add(AttributeBuilder.build(attribute, addtel));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), addtel);
+    }
+
+    @Test(dependsOnMethods = {"testSetXmlAddtel"})
+    public void testDeleteAddtel() throws RemoteException {
+
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+
+        String attribute = "ADDTEL";
+        attributes.add(AttributeBuilder.build(attribute));
+
+        // update it
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+
+        // read it
+        SapFilter query = new SapFilter();
+        query.setByName(USER_NAME);
+        final ConnectorObject[] found = {null};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0] = connectorObject;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        // check attribute values
+        ConnectorObject user = found[0];
+        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
     }
 }
+

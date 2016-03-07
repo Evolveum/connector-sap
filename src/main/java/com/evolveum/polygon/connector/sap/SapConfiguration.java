@@ -55,16 +55,24 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private Boolean useTransaction = true;
 
-    private Boolean activityGroupsWithDates = false;
-
     private Boolean testBapiFunctionPermission = true;
 
     private Boolean changePasswordAtNextLogon = false;
 
-    private String[] tables;
+    private Boolean useNativeNames = false;
 
+    private String[] tables = {"AGR_DEFINE as ACTIVITYGROUP=MANDT:3:IGNORE,AGR_NAME:30:KEY,PARENT_AGR:30", "USGRP as GROUP=MANDT:3:IGNORE,USERGROUP:12:KEY"};
+
+    private String[] tableParameterNames = {"PROFILES", "ACTIVITYGROUPS", "GROUPS"};
+
+    // what SAP table what columns and what lengt has
     Map<String, Map<String, Integer>> tableMetadatas = new LinkedHashMap<String, Map<String, Integer>>();
+    // what columns are SAP table keys
     Map<String, List<String>> tableKeys = new LinkedHashMap<String, List<String>>();
+    // what columns are ignored
+    Map<String, List<String>> tableIgnores = new LinkedHashMap<String, List<String>>();
+    // SAP table name to midPoint objectClass
+    Map<String, String> tableAliases = new LinkedHashMap<String, String>();
 
     @Override
     public void validate() {
@@ -83,10 +91,26 @@ public class SapConfiguration extends AbstractConfiguration {
 
         parseTableDefinitions();
 
+        checkParameterNames();
+
         try {
             new URL(host);
         } catch (MalformedURLException e) {
             throw new ConfigurationException("Malformed host: " + host, e);
+        }
+    }
+
+    private void checkParameterNames() {
+        for (String table : tableParameterNames) {
+            boolean ok = false;
+            for (String supportedTable : SapConnector.TABLETYPE_PARAMETER_LIST) {
+                if (supportedTable.equals(table)) {
+                    ok = true;
+                }
+            }
+            if (!ok){
+                throw new ConfigurationException("Parameter name "+ table+" not exists");
+            }
         }
     }
 
@@ -95,10 +119,17 @@ public class SapConfiguration extends AbstractConfiguration {
             for (String tableDef : tables) {
                 String[] table = tableDef.split("=");
                 if (table == null || table.length != 2) {
-                    throw new ConfigurationException("please use correct read only table definition, for example: 'AGR_DEFINE=MANDT:3:KEY,AGR_NAME:30:KEY,PARENT_AGR:30,CREATE_USR:12', got: " + table);
+                    throw new ConfigurationException("please use correct read only table definition, for example: 'AGR_DEFINE as ACTIVITYGROUP=MANDT:3:IGNORE,AGR_NAME:30:KEY,PARENT_AGR:30', got: " + table);
+                }
+                String tableName = table[0];
+                String tableAlias = table[0];
+                // table has alias
+                if (table[0].contains(" as ")) {
+                    String[] tableAs = table[0].split(" as ");
+                    tableName = tableAs[0];
+                    tableAlias = tableAs[1];
                 }
 
-                String tableName = table[0];
                 String[] columnsMetaDatas = table[1].split(",");
                 if (columnsMetaDatas == null || columnsMetaDatas.length == 0) {
                     throw new ConfigurationException("please put at least one column definition, for example: 'AGR_DEFINE=MANDT:3' (MANDT:3), got: " + columnsMetaDatas);
@@ -106,6 +137,7 @@ public class SapConfiguration extends AbstractConfiguration {
 
                 Map<String, Integer> tableMetadata = new LinkedHashMap<String, Integer>();
                 List<String> keys = new LinkedList<String>();
+                List<String> ignore = new LinkedList<String>();
                 for (String columnsMetaData : columnsMetaDatas) {
                     String[] column = columnsMetaData.split(":");
                     if (column == null || column.length < 2) {
@@ -126,6 +158,9 @@ public class SapConfiguration extends AbstractConfiguration {
                         if ("KEY".equalsIgnoreCase(key)) {
                             keys.add(columnName);
                         }
+                        else if ("IGNORE".equalsIgnoreCase(key)) {
+                            ignore.add(columnName);
+                        }
                     }
                 }
 
@@ -135,6 +170,8 @@ public class SapConfiguration extends AbstractConfiguration {
 
                 tableMetadatas.put(tableName, tableMetadata);
                 tableKeys.put(tableName, keys);
+                tableIgnores.put(tableName, ignore);
+                tableAliases.put(tableName, tableAlias);
             }
         }
     }
@@ -152,10 +189,11 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", failWhenTruncating=" + failWhenTruncating +
                 ", failWhenWarning=" + failWhenWarning +
                 ", useTransaction=" + useTransaction +
-                ", activityGroupsWithDates=" + activityGroupsWithDates +
                 ", testBapiFunctionPermission=" + testBapiFunctionPermission +
                 ", tables=" + Arrays.toString(tables) +
+                ", tableParameterNames=" + Arrays.toString(tableParameterNames) +
                 ", changePasswordAtNextLogon=" + changePasswordAtNextLogon +
+                ", useNativeNames=" + useNativeNames +
                 '}';
     }
 
@@ -273,16 +311,6 @@ public class SapConfiguration extends AbstractConfiguration {
         this.useTransaction = useTransaction;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.activityGroupsWithDates",
-            helpMessageKey = "sap.config.activityGroupsWithDates.help")
-    public Boolean getActivityGroupsWithDates() {
-        return activityGroupsWithDates;
-    }
-
-    public void setActivityGroupsWithDates(Boolean activityGroupsWithDates) {
-        this.activityGroupsWithDates = activityGroupsWithDates;
-    }
-
     @ConfigurationProperty(displayMessageKey = "sap.config.testBapiFunctionPermission",
             helpMessageKey = "sap.config.testBapiFunctionPermission.help")
     public Boolean getTestBapiFunctionPermission() {
@@ -303,6 +331,15 @@ public class SapConfiguration extends AbstractConfiguration {
         this.tables = tables;
     }
 
+    @ConfigurationProperty(displayMessageKey = "sap.config.tableParameterNames",
+            helpMessageKey = "sap.config.tableParameterNames.help")
+    public String[] getTableParameterNames() {
+        return tableParameterNames;
+    }
+
+    public void setTableParameterNames(String[] tableParameterNames) {
+        this.tableParameterNames = tableParameterNames;
+    }
 
     @ConfigurationProperty(displayMessageKey = "sap.config.changePasswordAtNextLogon",
             helpMessageKey = "sap.config.changePasswordAtNextLogon.help")
@@ -313,6 +350,17 @@ public class SapConfiguration extends AbstractConfiguration {
     public void setChangePasswordAtNextLogon(Boolean changePasswordAtNextLogon) {
         this.changePasswordAtNextLogon = changePasswordAtNextLogon;
     }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.useNativeNames",
+            helpMessageKey = "sap.config.useNativeNames.help")
+    public Boolean getUseNativeNames() {
+        return useNativeNames;
+    }
+
+    public void setUseNativeNames(Boolean useNativeNames) {
+        this.useNativeNames = useNativeNames;
+    }
+
 
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
