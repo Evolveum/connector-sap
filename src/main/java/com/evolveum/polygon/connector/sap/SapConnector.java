@@ -141,6 +141,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     @Override
     public void init(Configuration configuration) {
         this.configuration = (SapConfiguration) configuration;
+        LOG.info("Initialization start, configuration: {0}", this.configuration.toString());
 
         CustomDestinationDataProvider myProvider = CustomDestinationDataProvider.getInstance();
 
@@ -167,12 +168,12 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             throw new ConnectorIOException(e.getMessage(), e);
         }
 
-        // initialize read only tables
-        ((SapConfiguration) configuration).parseTableDefinitions();
+        // validate & initialize tables
+        ((SapConfiguration) configuration).validate();
         // read schema
         schema();
 
-        LOG.info("Initialization finished, configuration: {0}", this.configuration.toString());
+        LOG.info("Initialization finished");
     }
 
     @Override

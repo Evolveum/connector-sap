@@ -92,15 +92,14 @@ public class SapConfiguration extends AbstractConfiguration {
         parseTableDefinitions();
 
         checkParameterNames();
-
-        try {
-            new URL(host);
-        } catch (MalformedURLException e) {
-            throw new ConfigurationException("Malformed host: " + host, e);
-        }
     }
 
     private void checkParameterNames() {
+        // if empty, update length
+        if (tableParameterNames!=null && tableParameterNames.length==1 && "".equals(tableParameterNames[0])) {
+            tableParameterNames = new String[0];
+        }
+
         for (String table : tableParameterNames) {
             boolean ok = false;
             for (String supportedTable : SapConnector.TABLETYPE_PARAMETER_LIST) {
@@ -115,6 +114,11 @@ public class SapConfiguration extends AbstractConfiguration {
     }
 
     void parseTableDefinitions() {
+        // if empty, update length
+        if (tables!=null && tables.length==1 && "".equals(tables[0])) {
+            tables = new String[0];
+        }
+
         if (tables != null) {
             for (String tableDef : tables) {
                 String[] table = tableDef.split("=");
