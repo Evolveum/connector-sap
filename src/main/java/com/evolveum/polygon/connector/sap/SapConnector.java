@@ -50,7 +50,8 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             "BAPI_USER_CHANGE", "BAPI_USER_LOCK", "BAPI_USER_UNLOCK", "BAPI_USER_ACTGROUPS_ASSIGN",
             "RFC_GET_TABLE_ENTRIES", "SUSR_USER_CHANGE_PASSWORD_RFC", "SUSR_GENERATE_PASSWORD",
             "BAPI_USER_PROFILES_ASSIGN", "BAPI_HELPVALUES_GET",
-            "SUSR_LOGIN_CHECK_RFC", "PASSWORD_FORMAL_CHECK"
+            "SUSR_LOGIN_CHECK_RFC", "PASSWORD_FORMAL_CHECK",
+            "SUSR_GET_ADMIN_USER_LOGIN_INFO"
 
             /*"BAPI_ADDRESSORG_GETDETAIL", "BAPI_ORGUNITEXT_DATA_GET", */ /* BAPI to Read Organization Addresses, Get data on organizational unit  */
 
@@ -122,6 +123,9 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
     // PASSWORD
     private static final String BAPIPWD = "BAPIPWD";
+
+    //USER_LOGIN_INFO prefix
+    private static final String USER_LOGIN_INFO = "USER_LOGIN_INFO";
 
     public static final SimpleDateFormat SAP_DF = new SimpleDateFormat("yyyy-MM-dd");
     public static final SimpleDateFormat DATE_TIME = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
@@ -278,6 +282,13 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 attributeActivityGroupIds.setMultiValued(true);
                 objClassBuilder.addAttributeInfo(attributeActivityGroupIds.build());
             }
+        }
+        // user_login_infos
+        if (this.configuration.getAlsoReadLoginInfo()) {
+            boolean readOnly = true;
+            objClassBuilder.addAttributeInfo(createAttributeInfo(null, USER_LOGIN_INFO + SEPARATOR + "LAST_LOGON_DATE", Long.class, readOnly));
+            objClassBuilder.addAttributeInfo(createAttributeInfo(null, USER_LOGIN_INFO + SEPARATOR + "LOCK_STATUS", String.class, readOnly));
+            objClassBuilder.addAttributeInfo(createAttributeInfo(null, USER_LOGIN_INFO + SEPARATOR + "PASSWORD_STATUS", String.class, readOnly));
         }
 
         builder.defineObjectClass(objClassBuilder.build());
@@ -458,7 +469,9 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
                 JCoTable entries = function.getTableParameterList().getTable("VALUES_FOR_FIELD");
 
+
                 entries.firstRow();
+                LOG.ok("Number of entries in input: {0}, filter: {1}", entries.getNumRows(), query != null ? query.getByName() : "(empty)");
                 if (entries.getNumRows() > 0) {
                     do {
                         String profile = entries.getString("VALUES");
@@ -576,7 +589,9 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 function.getImportParameterList().setValue("USERNAME", query.getByName());
                 executeFunction(function);
 
-                ConnectorObject connectorObject = convertUserToConnectorObject(function);
+                JCoFunction userLoginInfoFunc = runUserLoginInfoFunction(query.getByName());
+
+                ConnectorObject connectorObject = convertUserToConnectorObject(function, userLoginInfoFunc);
                 handler.handle(connectorObject);
 
             } // find by name contains
@@ -603,7 +618,9 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
                         executeFunction(functionDetail);
 
-                        ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail);
+                        JCoFunction userLoginInfoFunc = runUserLoginInfoFunction(userList.getString("USERNAME"));
+
+                        ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail, userLoginInfoFunc);
                         boolean finish = !handler.handle(connectorObject);
                         if (finish)
                             break;
@@ -648,7 +665,9 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
                             executeFunction(functionDetail);
 
-                            ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail);
+                            JCoFunction userLoginInfoFunc = runUserLoginInfoFunction(userList.getString("USERNAME"));
+
+                            ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail, userLoginInfoFunc);
                             if (handler.handle(connectorObject)) {
                                 handled++;
                             } else {
@@ -674,7 +693,9 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
                             executeFunction(functionDetail);
 
-                            ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail);
+                            JCoFunction userLoginInfoFunc = runUserLoginInfoFunction(userList.getString("USERNAME"));
+
+                            ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail, userLoginInfoFunc);
                             boolean finish = !handler.handle(connectorObject);
                             if (finish) {
                                 LOG.ok("finishing read");
@@ -693,6 +714,19 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             // not known exceptions, change it to ConnectorIOException to show error message in midPoint
             throw new ConnectorIOException(e.getMessage(), e);
         }
+    }
+
+    private JCoFunction runUserLoginInfoFunction(String userName) throws JCoException {
+        if (!this.configuration.getAlsoReadLoginInfo()) {
+            return null;
+        }
+
+        JCoFunction function = destination.getRepository().getFunction("SUSR_GET_ADMIN_USER_LOGIN_INFO");
+        function.getImportParameterList().setValue("USERID", userName);
+
+        executeFunction(function);
+
+        return function;
     }
 
     private List<String> executeFunction(JCoFunction function) throws JCoException {
@@ -739,7 +773,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         }
     }
 
-    private ConnectorObject convertUserToConnectorObject(JCoFunction function) throws JCoException, TransformerException, ParserConfigurationException {
+    private ConnectorObject convertUserToConnectorObject(JCoFunction function, JCoFunction userLoginInfoFunc) throws JCoException, TransformerException, ParserConfigurationException {
         String userName = function.getImportParameterList().getString("USERNAME");
 
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
@@ -771,6 +805,15 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 String attribute = TABLETYPE_PARAMETER_KEYS.get(tableName);
                 builder.addAttribute(AttributeBuilder.build(tableName+SEPARATOR+ TABLETYPE_PARAMETER_KEYS.get(tableName), table.getIds(attribute)));
             }
+        }
+
+        if (userLoginInfoFunc != null) {
+            JCoParameterList epl = userLoginInfoFunc.getExportParameterList();
+
+            Date lastLogonDate = epl.getDate("LAST_LOGON_DATE");
+            addAttr(builder, USER_LOGIN_INFO + SEPARATOR + "LAST_LOGON_DATE", lastLogonDate == null ? null : lastLogonDate.getTime());
+            addAttr(builder, USER_LOGIN_INFO + SEPARATOR + "LOCK_STATUS", epl.getString("LOCK_STATUS"));
+            addAttr(builder, USER_LOGIN_INFO + SEPARATOR + "PASSWORD_STATUS", epl.getString("PASSWORD_STATUS"));
         }
 
         ConnectorObject connectorObject = builder.build();
@@ -1551,7 +1594,10 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 Date lastModification = DATE_TIME.parse(modDate + " " + modTime);
                 if (lastModification.after(fromToken)) {
                     changed++;
-                    ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail);
+
+                    JCoFunction userLoginInfoFunc = runUserLoginInfoFunction(userName);
+
+                    ConnectorObject connectorObject = convertUserToConnectorObject(functionDetail, userLoginInfoFunc);
 
                     SyncDeltaBuilder deltaBuilder = new SyncDeltaBuilder();
                     SyncToken deltaToken = new SyncToken(lastModification.getTime());

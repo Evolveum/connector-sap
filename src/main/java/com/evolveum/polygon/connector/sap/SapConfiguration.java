@@ -59,6 +59,8 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private Boolean changePasswordAtNextLogon = false;
 
+    private Boolean alsoReadLoginInfo = false;
+
     private Boolean useNativeNames = false;
 
     private String[] tables = {"AGR_DEFINE as ACTIVITYGROUP=MANDT:3:IGNORE,AGR_NAME:30:KEY,PARENT_AGR:30", "USGRP as GROUP=MANDT:3:IGNORE,USERGROUP:12:KEY"};
@@ -197,6 +199,7 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", tables=" + Arrays.toString(tables) +
                 ", tableParameterNames=" + Arrays.toString(tableParameterNames) +
                 ", changePasswordAtNextLogon=" + changePasswordAtNextLogon +
+                ", alsoReadLoginInfo=" + alsoReadLoginInfo +
                 ", useNativeNames=" + useNativeNames +
                 '}';
     }
@@ -353,6 +356,16 @@ public class SapConfiguration extends AbstractConfiguration {
 
     public void setChangePasswordAtNextLogon(Boolean changePasswordAtNextLogon) {
         this.changePasswordAtNextLogon = changePasswordAtNextLogon;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.alsoReadLoginInfo",
+            helpMessageKey = "sap.config.alsoReadLoginInfo.help")
+    public Boolean getAlsoReadLoginInfo() {
+        return alsoReadLoginInfo;
+    }
+
+    public void setAlsoReadLoginInfo(Boolean alsoReadLoginInfo) {
+        this.alsoReadLoginInfo = alsoReadLoginInfo;
     }
 
     @ConfigurationProperty(displayMessageKey = "sap.config.useNativeNames",
