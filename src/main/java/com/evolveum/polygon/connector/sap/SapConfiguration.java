@@ -28,6 +28,7 @@ import java.net.URL;
 import java.util.*;
 
 import static org.identityconnectors.common.StringUtil.isBlank;
+import static org.identityconnectors.common.StringUtil.isNotEmpty;
 
 public class SapConfiguration extends AbstractConfiguration {
 
@@ -48,6 +49,22 @@ public class SapConfiguration extends AbstractConfiguration {
     private String client;
 
     private String lang = "EN";
+
+    private String poolCapacity = "1";
+
+    private String peakLimit = "0";
+
+    private String sncLibrary = null;
+
+    private String sncMode = "0";
+
+    private String sncMyName = null;
+
+    private String sncPartnerName = null;
+
+    private String sncQoP = null;
+
+    private String x509Cert = null;
 
     private Boolean failWhenTruncating = true;
 
@@ -81,11 +98,13 @@ public class SapConfiguration extends AbstractConfiguration {
         if (isBlank(host)) {
             throw new ConfigurationException("host is empty");
         }
-        if (isBlank(user)) {
-            throw new ConfigurationException("username is empty");
-        }
-        if (isBlank(getPlainPassword())) {
-            throw new ConfigurationException("password is empty");
+        if (isBlank(x509Cert)) {
+            if (isBlank(user)) {
+                throw new ConfigurationException("username is empty");
+            }
+            if (isBlank(getPlainPassword())) {
+                throw new ConfigurationException("password is empty");
+            }
         }
         if (client == null) {
             throw new ConfigurationException("client is empty");
@@ -378,6 +397,85 @@ public class SapConfiguration extends AbstractConfiguration {
         this.useNativeNames = useNativeNames;
     }
 
+    @ConfigurationProperty(displayMessageKey = "sap.config.poolCapacity",
+            helpMessageKey = "sap.config.poolCapacity.help")
+    public String getPoolCapacity() {
+        return poolCapacity;
+    }
+
+    public void setPoolCapacity(String poolCapacity) {
+        this.poolCapacity = poolCapacity;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.peakLimit",
+            helpMessageKey = "sap.config.peakLimit.help")
+    public String getPeakLimit() {
+        return peakLimit;
+    }
+
+    public void setPeakLimit(String peakLimit) {
+        this.peakLimit = peakLimit;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.sncLibrary",
+            helpMessageKey = "sap.config.sncLibrary.help")
+    public String getSncLibrary() {
+        return sncLibrary;
+    }
+
+    public void setSncLibrary(String sncLibrary) {
+        this.sncLibrary = sncLibrary;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.sncMode",
+            helpMessageKey = "sap.config.sncMode.help")
+    public String getSncMode() {
+        return sncMode;
+    }
+
+    public void setSncMode(String sncMode) {
+        this.sncMode = sncMode;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.sncMyName",
+            helpMessageKey = "sap.config.sncMyName.help")
+    public String getSncMyName() {
+        return sncMyName;
+    }
+
+    public void setSncMyName(String sncMyName) {
+        this.sncMyName = sncMyName;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.sncPartnerName",
+            helpMessageKey = "sap.config.sncPartnerName.help")
+    public String getSncPartnerName() {
+        return sncPartnerName;
+    }
+
+    public void setSncPartnerName(String sncPartnerName) {
+        this.sncPartnerName = sncPartnerName;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.sncQoP",
+            helpMessageKey = "sap.config.sncQoP.help")
+    public String getSncQoP() {
+        return sncQoP;
+    }
+
+    public void setSncQoP(String sncQoP) {
+        this.sncQoP = sncQoP;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.x509Cert",
+            helpMessageKey = "sap.config.x509Cert.help")
+    public String getX509Cert() {
+        return x509Cert;
+    }
+
+    public void setX509Cert(String x509Cert) {
+        this.x509Cert = x509Cert;
+    }
 
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
@@ -401,9 +499,33 @@ public class SapConfiguration extends AbstractConfiguration {
         connectProperties.setProperty(DestinationDataProvider.JCO_SYSNR, systemNumber);
         connectProperties.setProperty(DestinationDataProvider.JCO_R3NAME, systemId);
         connectProperties.setProperty(DestinationDataProvider.JCO_CLIENT, client);
-        connectProperties.setProperty(DestinationDataProvider.JCO_USER, user);
-        connectProperties.setProperty(DestinationDataProvider.JCO_PASSWD, getPlainPassword());
         connectProperties.setProperty(DestinationDataProvider.JCO_LANG, lang);
+        connectProperties.setProperty(DestinationDataProvider.JCO_POOL_CAPACITY, poolCapacity);
+        connectProperties.setProperty(DestinationDataProvider.JCO_PEAK_LIMIT, peakLimit);
+        connectProperties.setProperty(DestinationDataProvider.JCO_SNC_MODE, sncMode);
+
+        if (isNotEmpty(user)) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_USER, user);
+        }
+        if (isNotEmpty(getPlainPassword())) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_PASSWD, getPlainPassword());
+        }
+        if (isNotEmpty(sncLibrary)) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_SNC_LIBRARY, sncLibrary);
+        }
+        if (isNotEmpty(sncMyName)) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_SNC_MYNAME, sncMyName);
+        }
+        if (isNotEmpty(sncPartnerName)) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_SNC_PARTNERNAME, sncPartnerName);
+        }
+        if (isNotEmpty(sncQoP)) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_SNC_QOP, sncQoP);
+        }
+        if (isNotEmpty(x509Cert)) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_X509CERT, x509Cert);
+        }
+
         return connectProperties;
     }
 
