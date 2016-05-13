@@ -68,7 +68,7 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private Boolean failWhenTruncating = true;
 
-    private Boolean failWhenWarning = false;
+    private Boolean failWhenWarning = true;
 
     private Boolean useTransaction = true;
 

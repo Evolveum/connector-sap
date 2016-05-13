@@ -863,8 +863,13 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
         if (error) {
             throw new ConnectorException(ret + ", XML representation: \n" + tpl.toXML());
-        } else if (warning && configuration != null && configuration.getFailWhenWarning()) {
-            throw new ConnectorException(ret + ", XML representation: \n" + tpl.toXML());
+        } else if (warning) {
+            if (configuration != null && configuration.getFailWhenWarning()) {
+                throw new ConnectorException(ret + ", XML representation: \n" + tpl.toXML());
+            }
+            else {
+                LOG.warn("SAP returns warning, but was ignored (failWhenWarning != true) : " + ret);
+            }
         }
 
         LOG.ok("Return messages: " + ret);
