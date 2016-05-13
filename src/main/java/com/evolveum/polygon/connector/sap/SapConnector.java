@@ -1065,7 +1065,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                             // execute change password again
                             executeFunction(changePassFunction);
                         } catch (JCoException eu) {
-                            throw new ConnectorIOException("Password is not yet changeable remotely, please unlock user "+userName+" manually in GUI: " + e, e);
+                            throw new PermissionDeniedException("Password is not yet changeable remotely, please unlock user "+userName+" manually in GUI: " + e, e);
                         }
                     }
                 }
