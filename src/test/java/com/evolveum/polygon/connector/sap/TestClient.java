@@ -1065,5 +1065,12 @@ public class TestClient {
         LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
     }
+
+//    @Test
+//    public void testResetFailedLoginCount() throws RemoteException, JCoException {
+//
+//        sapConnector.resetFailedLoginCount("XXX");
+//
+//    }
 }
 

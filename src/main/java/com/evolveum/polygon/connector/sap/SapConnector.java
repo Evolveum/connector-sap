@@ -52,6 +52,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             "BAPI_USER_PROFILES_ASSIGN", "BAPI_HELPVALUES_GET",
             "SUSR_LOGIN_CHECK_RFC", "PASSWORD_FORMAL_CHECK",
             "SUSR_GET_ADMIN_USER_LOGIN_INFO"
+//            , "SUSR_BAPI_USER_UNLOCK"
 
             /*"BAPI_ADDRESSORG_GETDETAIL", "BAPI_ORGUNITEXT_DATA_GET", */ /* BAPI to Read Organization Addresses, Get data on organizational unit  */
 
@@ -64,7 +65,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             /*"BAPI_USER_ACTGROUPS_DELETE", */ /* replaced with BAPI_USER_ACTGROUPS_ASSIGN */
             /*"BAPI_USER_PROFILES_DELETE" */ /* replaced with BAPI_USER_PROFILES_ASSIGN, NON CUA landscape */
             /*"BAPI_USER_DISPLAY",*/ /*Don't need, using BAPI_USER_GET_DETAIL */
-            /*"SUSR_BAPI_USER_LOCK", "SUSR_BAPI_USER_UNLOCK", "BAPI_USER_CREATE" */ /*DO NOT USE !*/
+            /*"SUSR_BAPI_USER_LOCK", "BAPI_USER_CREATE" */ /*DO NOT USE !*/
     };
 
     // SAP roles, groups, profiles
@@ -1083,6 +1084,10 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 executeFunction(function);
                 LOG.ok("User "+userName+" need to change his password on next login." );
             }
+
+            // hack for Information message: Number of failed password login attempts: 1 (see long text)
+            isPasswordAlreadySet(userName, pwd.toString());
+
             // password was updated;
             return true;
         }
@@ -1713,7 +1718,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
     }
 
-    protected void validatePassword(String password) throws JCoException {
+    private void validatePassword(String password) throws JCoException {
         JCoFunction function = destination.getRepository().getFunction("PASSWORD_FORMAL_CHECK");
         if (function == null)
             throw new RuntimeException("PASSWORD_FORMAL_CHECK not found in SAP.");
@@ -1734,5 +1739,16 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             LOG.ok("PASSWORD_FORMAL_CHECK is NOT remote enabled");
         }
     }
+
+//    public void resetFailedLoginCount(String userName) throws JCoException {
+//        JCoFunction function = destination.getRepository().getFunction("SUSR_BAPI_USER_UNLOCK");
+//        if (function == null)
+//            throw new RuntimeException("SUSR_BAPI_USER_UNLOCK not found in SAP.");
+//
+//        function.getImportParameterList().setValue("USERNAME", userName);
+//        function.getImportParameterList().getStructure("LOCK_WRONG_LOGON").setValue("BAPIFLAG", SELECT);
+//
+//        function.execute(destination);
+//   }
 
 }
