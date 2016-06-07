@@ -119,6 +119,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
     //ISLOCKED
     private static final String LOCAL_LOCK = "LOCAL_LOCK";     // Local_Lock - Logon generally locked for the local system
+    private static final String WRNG_LOGON = "WRNG_LOGON";     // WRNG_LOGON - Password logon locked by incorrect logon attempts
 
     private static final String USERNAME = "USERNAME";
 
@@ -261,7 +262,8 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         sapAttributesType.put(USERNAME, "java.lang.String");
         sapAttributesLength.put(USERNAME, 12);
 
-        objClassBuilder.addAttributeInfo(OperationalAttributeInfos.ENABLE);     // LOCK / UNLOCK - ISLOCKED.LOCAL_LOCK
+        objClassBuilder.addAttributeInfo(OperationalAttributeInfos.ENABLE);     // enable / disable - ISLOCKED.LOCAL_LOCK
+        objClassBuilder.addAttributeInfo(OperationalAttributeInfos.LOCK_OUT);   // unlock - ISLOCKED.WRNG_LOGON
         objClassBuilder.addAttributeInfo(OperationalAttributeInfos.ENABLE_DATE); // LOGONDATA.GLTGV
         objClassBuilder.addAttributeInfo(OperationalAttributeInfos.DISABLE_DATE); //LOGONDATA.GLTGB
 
@@ -733,7 +735,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
     private List<String> executeFunction(JCoFunction function) throws JCoException {
         function.execute(destination);
 
-        return parseReturnMessages(function.getTableParameterList());
+        return parseReturnMessages(function);
     }
 
     private void getDataFromBapiFunction(JCoFunction function, String[] parameterList, ConnectorObjectBuilder builder) throws JCoException {
@@ -788,8 +790,8 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         Boolean enable = "U".equals(islocked.getString(LOCAL_LOCK)); // U - unlocked, L - locked
         addAttr(builder, OperationalAttributes.ENABLE_NAME, enable);
         // we don't have BAPI method to unlock only this
-//        Boolean lock_out = "U".equals(islocked.getString("WRNG_LOGON")); // U - unlocked, L - locked
-//        addAttr(builder, OperationalAttributes.LOCK_OUT_NAME, lock_out);
+        Boolean lock_out = "U".equals(islocked.getString("WRNG_LOGON")); // U - unlocked, L - locked
+        addAttr(builder, OperationalAttributes.LOCK_OUT_NAME, lock_out);
 
         JCoStructure logonData = function.getExportParameterList().getStructure("LOGONDATA");
         Date gltgv = logonData.getDate(GLTGV);
@@ -825,7 +827,10 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         return connectorObject;
     }
 
-    public List<String> parseReturnMessages(JCoParameterList tpl) {
+    public List<String> parseReturnMessages(JCoFunction function) {
+
+        JCoParameterList tpl = function.getTableParameterList();
+
         if (tpl == null)
             return null;
 
@@ -844,16 +849,16 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
                 if ("E".equals(type)) {
                     error = true;
                     if ("224".equals(number)) { // User XXX already exists , alternative is BAPI_USER_EXISTENCE_CHECK function
-                        throw new AlreadyExistsException(message + ", returnList: " + returnList.toXML());
+                        throw new AlreadyExistsException(message+", RETURN: "+returnList.toXML());
                     }
                     if ("124".equals(number)) { // User XXX does not exist
-                        throw new UnknownUidException(message);
+                        throw new UnknownUidException(message+", RETURN: "+returnList.toXML());
                     }
                     if ("187".equals(number)) { // Password is not long enough (minimum length: 8 characters)
-                        throw new InvalidPasswordException(message);
+                        throw new InvalidPasswordException(message+", RETURN: "+returnList.toXML());
                     }
                     if ("290".equals(number)) { // Please enter an initial password
-                        throw new InvalidPasswordException(message);
+                        throw new InvalidPasswordException(message+", RETURN: "+returnList.toXML());
                     }
                 } else if ("W".equals(type)) {
                     warning = true;
@@ -873,7 +878,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             }
         }
 
-        LOG.ok("Return messages: " + ret);
+        LOG.ok("Return messages: " + ret+" for function: "+function.getName());
         return ret;
     }
 
@@ -982,8 +987,8 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         // assign PROFILES if needed
         assignProfiles(attributes, userName);
 
-        // enable or disable user
-        enableOrDisableUser(attributes, userName);
+        // enable/disable/unlock user
+        handleActivation(attributes, userName);
 
         return new Uid(savedUserName);
     }
@@ -1414,7 +1419,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         String newUserName = getStringAttr(attributes, Name.NAME, sapAttributesLength.get(USERNAME));
 
         if (!StringUtil.isEmpty(newUserName) && !userName.equalsIgnoreCase(newUserName)) {
-            throw new ConnectorException("SAP don't support RENAME user from '" + userName + "' to '" + newUserName + "'");
+            throw new PermissionDeniedException("SAP don't support RENAME user from '" + userName + "' to '" + newUserName + "'");
         }
 
         function.getImportParameterList().setValue("USERNAME", userName);
@@ -1442,23 +1447,62 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         // assign PROFILES if needed
         assignProfiles(attributes, userName);
 
-        // enable or disable user
-        enableOrDisableUser(attributes, changedUserName);
+        // enable/disable/unlock user
+        handleActivation(attributes, userName);
 
         return new Uid(changedUserName);
     }
 
-    private void enableOrDisableUser(Set<Attribute> attributes, String userName) throws JCoException {
+    private void handleActivation(Set<Attribute> attributes, String userName) throws JCoException {
+        Boolean lockOut = getAttr(attributes, OperationalAttributes.LOCK_OUT_NAME, Boolean.class, null);
         Boolean enable = getAttr(attributes, OperationalAttributes.ENABLE_NAME, Boolean.class, null);
-        if (enable != null) {
-            String functionName = enable ? "BAPI_USER_UNLOCK" : "BAPI_USER_LOCK";
-            JCoFunction functionLock = destination.getRepository().getFunction(functionName);
-            if (functionLock == null)
-                throw new RuntimeException(functionName + " not found in SAP.");
+        if (lockOut != null) {
+            // locking is not supported
+            if (lockOut) {
+                throw new PermissionDeniedException("LOCK_OUT is "+lockOut+", supported is only unlock operation (false)");
+            }
+            // unlocking is supported
+            // unlock account after logon locked by incorrect logon attempts
+            if (enable != null && enable) {
+                // user is unlocked when we run BAPI_USER_UNLOCK to enable it later
+                LOG.ok("lockoutStatus is set to: " + lockOut+", enable: "+enable+", unlocking account over enable operation");
+            }
+            else if (enable !=null && !enable) {
+                // user will be disabled, but we need to unlock also, we enable it now, and later disable it
+                LOG.ok("lockoutStatus is set to: " + lockOut+", enable: "+enable+", enabling user to unlock his account and disable it");
+                enableOrDisableUser(true, userName);
+            }
+            else if (enable == null) {
+                // we need to read administrative status, enable account to unlock it and if old status was disabled, disable it
+                JCoFunction function = destination.getRepository().getFunction("BAPI_USER_GET_DETAIL");
+                function.getImportParameterList().setValue("USERNAME", userName);
+                executeFunction(function);
 
-            functionLock.getImportParameterList().setValue("USERNAME", userName);
-            executeFunction(functionLock);
+                JCoStructure islocked = function.getExportParameterList().getStructure("ISLOCKED");
+                Boolean enabledBefore = "U".equals(islocked.getString(LOCAL_LOCK)); // U - unlocked, L - locked
+
+                LOG.ok("lockoutStatus is set to: " + lockOut+", enable: "+enable+", readed administrative status from SAP: "+enabledBefore+", unlocking acount and setting the same result");
+                enableOrDisableUser(true, userName);
+
+                if (!enabledBefore) {
+                    enableOrDisableUser(false, userName);
+                }
+            }
         }
+
+        if (enable != null) {
+            enableOrDisableUser(enable, userName);
+        }
+    }
+
+    private void enableOrDisableUser(boolean enable, String userName) throws JCoException {
+        String functionName = enable ? "BAPI_USER_UNLOCK" : "BAPI_USER_LOCK";
+        JCoFunction functionLock = destination.getRepository().getFunction(functionName);
+        if (functionLock == null)
+            throw new RuntimeException(functionName + " not found in SAP.");
+
+        functionLock.getImportParameterList().setValue("USERNAME", userName);
+        executeFunction(functionLock);
     }
 
     private void assignActivityGroups(Set<Attribute> attributes, String userName) throws JCoException {
@@ -1739,16 +1783,5 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             LOG.ok("PASSWORD_FORMAL_CHECK is NOT remote enabled");
         }
     }
-
-//    public void resetFailedLoginCount(String userName) throws JCoException {
-//        JCoFunction function = destination.getRepository().getFunction("SUSR_BAPI_USER_UNLOCK");
-//        if (function == null)
-//            throw new RuntimeException("SUSR_BAPI_USER_UNLOCK not found in SAP.");
-//
-//        function.getImportParameterList().setValue("USERNAME", userName);
-//        function.getImportParameterList().getStructure("LOCK_WRONG_LOGON").setValue("BAPIFLAG", SELECT);
-//
-//        function.execute(destination);
-//   }
 
 }

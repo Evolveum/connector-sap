@@ -489,6 +489,16 @@ public class TestClient {
         // checked in testCreateFull
     }
 
+    @Test
+    public void testUnlockUser() throws RemoteException {
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(OperationalAttributes.LOCK_OUT_NAME, false));
+        attributes.add(AttributeBuilder.build(OperationalAttributes.ENABLE_NAME, false));
+
+        OperationOptions operationOptions = null;
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, operationOptions);
+    }
+
     @Test(dependsOnMethods = {"testCreateFull"})
     public void testEnableUser() throws RemoteException {
         Set<Attribute> attributes = new HashSet<Attribute>();
@@ -1066,11 +1076,5 @@ public class TestClient {
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
     }
 
-//    @Test
-//    public void testResetFailedLoginCount() throws RemoteException, JCoException {
-//
-//        sapConnector.resetFailedLoginCount("XXX");
-//
-//    }
 }
 
