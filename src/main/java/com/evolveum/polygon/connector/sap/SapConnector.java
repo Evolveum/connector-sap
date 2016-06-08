@@ -790,7 +790,7 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         Boolean enable = "U".equals(islocked.getString(LOCAL_LOCK)); // U - unlocked, L - locked
         addAttr(builder, OperationalAttributes.ENABLE_NAME, enable);
         // we don't have BAPI method to unlock only this
-        Boolean lock_out = "U".equals(islocked.getString("WRNG_LOGON")); // U - unlocked, L - locked
+        Boolean lock_out = "L".equals(islocked.getString("WRNG_LOGON")); // U - unlocked, L - locked
         addAttr(builder, OperationalAttributes.LOCK_OUT_NAME, lock_out);
 
         JCoStructure logonData = function.getExportParameterList().getStructure("LOGONDATA");
