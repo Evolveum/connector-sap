@@ -1,6 +1,5 @@
 package com.evolveum.polygon.connector.sap;
 
-import com.sap.conn.jco.JCoException;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.exceptions.UnknownUidException;
@@ -15,12 +14,13 @@ import javax.xml.parsers.ParserConfigurationException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.rmi.RemoteException;
-import java.text.ParseException;
 import java.util.*;
 
 
 /**
  * Created by gpalos on 19. 1. 2016.
+ *
+ * unit test, to run properly you need set configuration to SAP system over test.properties file
  */
 public class TestClient {
 
@@ -30,12 +30,18 @@ public class TestClient {
     private static final Log LOG = Log.getLog(TestClient.class);
 
     static final ObjectClass ACCOUNT_OBJECT_CLASS = new ObjectClass(ObjectClass.ACCOUNT_NAME);
+    /**
+     * what attributes wee need to have access
+     */
     static final String[] MINIMAL_ACCOUNT_ATTRIBUTE_LIST = {SapConnector.ACTIVITYGROUPS, "LOGONDATA.GLTGB", "ADDRESS.TITLE_P",
             "ADDRESS.FIRSTNAME", "ADDRESS.LASTNAME", "ADDRESS.TITLE_ACA1", "ADDRESS.E_MAIL", "ADDRESS.TEL1_EXT",
             "ADDRESS.TEL1_NUMBR", "ADDRESS.FAX_NUMBER", "ADDRESS.FAX_EXTENS", "ADDRESS.ROOM_NO_P", "ADDRESS.DEPARTMENT",
             "ADDRESS.COMM_TYPE", "ADDRESS.COUNTRY", "ADDRESS.LANGU_P", "ADDRESS.LANGU_ISO", "DEFAULTS.SPLD",
             "UCLASS.LIC_TYPE", "UCLASS.SYSID", "UCLASS.CLIENT", "UCLASS.BNAME_CHARGEABLE", "LOGONDATA.GLTGV"};
 
+    /**
+     * test user name
+     */
     static final String USER_NAME = "Evolveum";
 
     @BeforeClass
@@ -46,6 +52,14 @@ public class TestClient {
 
         sapConnector = new SapConnector();
         sapConnector.init(sapConfiguration);
+
+        try {
+            // delete old test account
+            sapConnector.delete(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), null);
+        }
+        catch (Exception e){
+            LOG.warn("Only cleanup test user..." + e, e.toString());
+        }
     }
 
     private static SapConfiguration readSapConfigurationFromFile(String fileName) throws IOException {
@@ -171,23 +185,11 @@ public class TestClient {
 
         Assert.assertTrue(count[0] == pageSize, "Find " + pageSize + " users return " + count[0] + " users");
     }
-    @Test
-    public void testCreateMinimal() throws RemoteException {
-        Set<Attribute> attributes = new HashSet<Attribute>();
-        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
-        GuardedString password = new GuardedString("Test1234".toCharArray());
-        attributes.add(AttributeBuilder.build(OperationalAttributes.PASSWORD_NAME, password));
-
-        OperationOptions operationOptions = null;
-        sapConnector.create(ACCOUNT_OBJECT_CLASS, attributes, operationOptions);
-
-        testFindUser();
-    }
 
     @Test(dependsOnMethods = {"testCreateFull"})
     public void testFindUser() throws RemoteException {
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final boolean[] found = {false};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -202,10 +204,11 @@ public class TestClient {
         Assert.assertTrue(found[0], "User " + USER_NAME + " not found");
     }
 
-    @Test(dependsOnMethods = {"testCreateMinimal"})
+    @Test(dependsOnMethods = {"testCreateFull"})
     public void testFindContains() throws RemoteException {
-        SapFilter query = new SapFilter();
-        query.setByNameContains("volv"); // evolveum
+        String value = SapFilter.ANY_NUMBER_OF_CHARACTERS + "volv" + SapFilter.ANY_NUMBER_OF_CHARACTERS; // evolveum
+        SapFilter query = new SapFilter(SapFilter.OPERATOR_CONTAINS_PATTERN, SapConnector.USERNAME, value);
+
         final boolean[] found = {false};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -217,18 +220,29 @@ public class TestClient {
         OperationOptions options = null;
         sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
 
-        Assert.assertTrue(found[0], "User containing " + query.getByNameContains() + " not found");
+        Assert.assertTrue(found[0], "User containing " + query.byNameContains() + " not found");
     }
 
-    @Test(dependsOnMethods = {"testCreateMinimal"})
+    @Test(dependsOnMethods = {"testCreateFull"})
     public void testDelete() throws RemoteException {
+        String userName = USER_NAME+"Del";
+
+        // create new
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, userName));
+        GuardedString password = new GuardedString("Test1234".toCharArray());
+        attributes.add(AttributeBuilder.build(OperationalAttributes.PASSWORD_NAME, password));
+
         OperationOptions operationOptions = null;
-        sapConnector.delete(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), operationOptions);
+        sapConnector.create(ACCOUNT_OBJECT_CLASS, attributes, operationOptions);
+
+        // delete it
+        sapConnector.delete(ACCOUNT_OBJECT_CLASS, new Uid(userName), operationOptions);
 
         boolean deleted = false;
         try {
             SapFilter query = new SapFilter();
-            query.setByName(USER_NAME);
+            query.setByUsernameEquals(userName);
             final boolean[] found = {false};
             ResultsHandler handler = new ResultsHandler() {
                 @Override
@@ -243,11 +257,11 @@ public class TestClient {
             deleted = true;
         }
 
-        Assert.assertTrue(deleted, "User " + USER_NAME + " was not deleted");
+        Assert.assertTrue(deleted, "User " + userName + " was not deleted");
     }
 
 
-    @Test(dependsOnMethods = {"testDelete"})
+    @Test
     public void testCreateFull() throws RemoteException {
         Set<Attribute> attributes = new HashSet<Attribute>();
         attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
@@ -311,7 +325,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -429,7 +443,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -528,8 +542,7 @@ public class TestClient {
         try {
             sapConn.init(sapConf);
             sapConn.test();
-        } catch (Exception e)
-        {
+        } catch (Exception e) {
             // authentificated, but don't have privileges
             if (!e.toString().contains("No RFC authorization for function module RFCPING")) {
                 throw e;
@@ -540,7 +553,7 @@ public class TestClient {
     @Test(dependsOnMethods = {"testCreateFull"})
     public void testSync() throws IOException {
         SyncToken syncToken = sapConnector.getLatestSyncToken(ACCOUNT_OBJECT_CLASS);
-        testChangePassword();
+        testEnableUser();
         final boolean[] changeDetected = {false};
         SyncResultsHandler syncResultsHandler = new SyncResultsHandler() {
             @Override
@@ -570,10 +583,28 @@ public class TestClient {
         OperationOptions options = null;
         ObjectClass objectClass = new ObjectClass("ACTIVITYGROUP");
         sapConnector.executeQuery(objectClass, query, handler, options);
-        LOG.info("count: "+count[0]);
+        LOG.info("count: " + count[0]);
         Assert.assertTrue(count[0] > 0, "Find all roles return zero lines");
     }
 
+    @Test
+    public void testFindOneActivityGroups() throws RemoteException {
+        SapFilter query = new SapFilter("SAPCRM_DEVELOPER");
+        final int[] count = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                System.out.println("connectorObject = " + connectorObject);
+                count[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        ObjectClass objectClass = new ObjectClass("ACTIVITYGROUP");
+        sapConnector.executeQuery(objectClass, query, handler, options);
+        LOG.info("count: " + count[0]);
+        Assert.assertTrue(count[0] == 1, "Find one roles return not 1 lines");
+    }
 
     @Test(dependsOnMethods = {"testCreateFull"})
     public void testAliasAndReadOnlyAttribute() throws RemoteException {
@@ -592,7 +623,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -642,7 +673,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -656,7 +687,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), activityGroup);
     }
 
@@ -676,7 +707,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -690,7 +721,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), activityGroup);
     }
 
@@ -710,7 +741,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -743,10 +774,28 @@ public class TestClient {
         OperationOptions options = null;
         ObjectClass objectClass = new ObjectClass(SapConnector.PROFILE_NAME);
         sapConnector.executeQuery(objectClass, query, handler, options);
-        LOG.info("count: "+count[0]);
+        LOG.info("count: " + count[0]);
         Assert.assertTrue(count[0] > 0, "Find all profiles return zero lines");
     }
 
+    @Test
+    public void testFindOneProfile() throws RemoteException {
+        SapFilter query = new SapFilter("&_SAP_ALL_00");
+        final int[] count = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                System.out.println("connectorObject = " + connectorObject);
+                count[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        ObjectClass objectClass = new ObjectClass(SapConnector.PROFILE_NAME);
+        sapConnector.executeQuery(objectClass, query, handler, options);
+        LOG.info("count: " + count[0]);
+        Assert.assertTrue(count[0] == 1, "Find one profile return not one profile");
+    }
 
     @Test(dependsOnMethods = {"testCreateFull"})
     public void testSetSimpleProfiles() throws RemoteException {
@@ -764,7 +813,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -778,7 +827,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), profile);
     }
 
@@ -798,7 +847,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -812,7 +861,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), profile);
     }
 
@@ -833,7 +882,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -847,7 +896,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
 //        String defaultProfile = "T-E1010108";
 //        Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), defaultProfile);
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
@@ -868,9 +917,29 @@ public class TestClient {
         OperationOptions options = null;
         ObjectClass objectClass = new ObjectClass("GROUP");
         sapConnector.executeQuery(objectClass, query, handler, options);
-        LOG.info("count: "+count[0]);
+        LOG.info("count: " + count[0]);
 
         Assert.assertTrue(count[0] > 0, "Find all groups return zero lines");
+    }
+
+    @Test
+    public void testFindOneGroup() throws RemoteException {
+        SapFilter query = new SapFilter("SUPER");
+        final int[] count = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                System.out.println("connectorObject = " + connectorObject);
+                count[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        ObjectClass objectClass = new ObjectClass("GROUP");
+        sapConnector.executeQuery(objectClass, query, handler, options);
+        LOG.info("count: " + count[0]);
+
+        Assert.assertTrue(count[0] == 1, "Find one group not return 1 lines");
     }
 
     @Test(dependsOnMethods = {"testCreateFull"})
@@ -889,7 +958,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -903,7 +972,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), group);
     }
 
@@ -923,7 +992,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -937,7 +1006,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
     }
 
@@ -957,7 +1026,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -971,7 +1040,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), parameter);
     }
 
@@ -990,7 +1059,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -1004,7 +1073,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
     }
 
@@ -1025,7 +1094,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -1039,7 +1108,7 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().get(0), addtel);
     }
 
@@ -1058,7 +1127,7 @@ public class TestClient {
 
         // read it
         SapFilter query = new SapFilter();
-        query.setByName(USER_NAME);
+        query.setByUsernameEquals(USER_NAME);
         final ConnectorObject[] found = {null};
         ResultsHandler handler = new ResultsHandler() {
             @Override
@@ -1072,9 +1141,142 @@ public class TestClient {
 
         // check attribute values
         ConnectorObject user = found[0];
-        LOG.info(attribute+": {0}", user.getAttributeByName(attribute).getValue());
+        LOG.info(attribute + ": {0}", user.getAttributeByName(attribute).getValue());
         Assert.assertEquals(user.getAttributeByName(attribute).getValue().size(), 0);
     }
 
+    @Test//(dependsOnMethods = {"testCreateFull"})
+    public void testAndFilter() throws RemoteException {
+        SapFilter left = new SapFilter("EQ", "ACTIVITYGROUPS.AGR_NAME", "ZBC_WWK_ENDUSER");
+        SapFilter right = new SapFilter("CP", "PROFILES.BAPIPROF", "SAP_ALL");
+        SapFilter query = new SapFilter("AND", left);
+        query.handleNextExpression(right);
+
+        final int[] found = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        Assert.assertTrue(found[0]>0, "User's not found");
+    }
+
+    @Test//(dependsOnMethods = {"testCreateFull"})
+    public void testOrFilter() throws RemoteException {
+        SapFilter left = new SapFilter("EQ", "ACTIVITYGROUPS.AGR_NAME", "ZBC_WWK_ENDUSER");
+        SapFilter right = new SapFilter("CP", "ACTIVITYGROUPS.AGR_NAME", "ZSR_ADM_IT");
+        SapFilter query = new SapFilter("OR", left);
+        query.handleNextExpression(right);
+
+        final int[] found = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, query, handler, options);
+
+        Assert.assertTrue(found[0]>0, "User's not found");
+    }
+
+    @Test//(dependsOnMethods = {"testCreateFull"})
+    public void testAndSameFieldFilter() throws RemoteException {
+        SapFilter left = new SapFilter("EQ", "ACTIVITYGROUPS.AGR_NAME", "ZBC_WWK_ENDUSER");
+        SapFilter right = new SapFilter("EQ", "ACTIVITYGROUPS.AGR_NAME", "ZSR_ADM_IT");
+        SapFilter and = new SapFilter("AND", left);
+        and = and.handleNextExpression(right); // after handleNextExpression AND filter is NULL !!!
+
+        final int[] found = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, and, handler, options);
+        LOG.info("number of users found: "+found[0]);
+
+        Assert.assertTrue(found[0]>0, "User's not found");
+    }
+
+    @Test//(dependsOnMethods = {"testCreateFull"})
+    public void testAndAndSameFieldFilter() throws RemoteException {
+        SapFilter left = new SapFilter("EQ", "ACTIVITYGROUPS.AGR_NAME", "ZBC_WWK_ENDUSER");
+        SapFilter right = new SapFilter("CP", "PROFILES.BAPIPROF", "SAP_ALL");
+        SapFilter and = new SapFilter("AND", left);
+        and = and.handleNextExpression(right);
+
+        SapFilter left2 = new SapFilter("EQ", "ACTIVITYGROUPS.AGR_NAME", "ZSR_ADM_IT");
+        and = and.handleNextExpression(left2); // after handleNextExpression AND filter is NULL !!!
+
+        final int[] found = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, and, handler, options);
+        LOG.info("number of users found: "+found[0]);
+
+        Assert.assertTrue(found[0]>0, "User's not found");
+    }
+
+    @Test//(dependsOnMethods = {"testCreateFull"})
+    public void testAndAndFilter() throws RemoteException {
+        SapFilter left = new SapFilter("EQ", "ACTIVITYGROUPS.AGR_NAME", "ZBC_WWK_ENDUSER");
+        SapFilter right = new SapFilter("CP", "PROFILES.BAPIPROF", "SAP_ALL");
+        SapFilter and = new SapFilter("AND", left);
+        and = and.handleNextExpression(right);
+
+        SapFilter left2 = new SapFilter("EQ", "LOGONDATA.UFLAG", "0"); // enabled : count: 11
+//        SapFilter left2 = new SapFilter("NE", "LOGONDATA.UFLAG", "0"); // not enabled : count: 0
+        and = and.handleNextExpression(left2); // after handleNextExpression AND filter is NULL !!!
+
+        final int[] found = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, and, handler, options);
+        LOG.info("number of users found: "+found[0]);
+
+        Assert.assertTrue(found[0]>10, "Not enougth user found: "+found[0]);
+    }
+
+    @Test//(dependsOnMethods = {"testCreateFull"})
+    public void testDisabledFilter() throws RemoteException {
+        SapFilter disabled = new SapFilter("NE", "LOGONDATA.UFLAG", "0"); // not enabled
+
+        final int[] found = {0};
+        ResultsHandler handler = new ResultsHandler() {
+            @Override
+            public boolean handle(ConnectorObject connectorObject) {
+                found[0]++;
+                return true; // continue
+            }
+        };
+        OperationOptions options = null;
+        sapConnector.executeQuery(ACCOUNT_OBJECT_CLASS, disabled, handler, options);
+        LOG.info("number of users found: "+found[0]);
+
+        Assert.assertTrue(found[0]>6, "Not enougth user found: "+found[0]);
+    }
 }
 

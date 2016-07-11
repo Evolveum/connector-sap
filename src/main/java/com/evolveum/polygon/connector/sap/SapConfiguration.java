@@ -23,8 +23,6 @@ import org.identityconnectors.framework.common.exceptions.ConfigurationException
 import org.identityconnectors.framework.spi.AbstractConfiguration;
 import org.identityconnectors.framework.spi.ConfigurationProperty;
 
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.*;
 
 import static org.identityconnectors.common.StringUtil.isBlank;
@@ -42,7 +40,10 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private GuardedString password;
 
-    private String systemId; //r3Name
+    /**
+     * r3Name in SAP
+     */
+    private String systemId;
 
     private String systemNumber = "00";
 
@@ -66,32 +67,76 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private String x509Cert = null;
 
+    private String cpicTrace = null;
+
+    private String trace = null;
+
+    /**
+     * throw exception when data will be truncated in SAP and not fit to actual atribute size
+     */
     private Boolean failWhenTruncating = true;
 
+    /**
+     * throw exception when SAP return a warning message after BAPI call
+     */
     private Boolean failWhenWarning = true;
 
+    /**
+     * use transaction in SAP when create/update
+     */
     private Boolean useTransaction = true;
 
+    /**
+     * test BAPI functions visibility when test connection
+     */
     private Boolean testBapiFunctionPermission = true;
 
+    /**
+     * if true we use SUSR_USER_CHANGE_PASSWORD_RFC BAPI to change password and user don't need to change his password at next logon
+     */
     private Boolean changePasswordAtNextLogon = false;
 
+    /**
+     * if true, read also login information over SUSR_GET_ADMIN_USER_LOGIN_INFO
+     */
     private Boolean alsoReadLoginInfo = false;
 
+    /**
+     * newer ConnId framework support native names instead of icfs:UID & icfs:NAME
+     */
     private Boolean useNativeNames = false;
 
+    /**
+     * definition of any tables in SAP to read his data, for example:
+     * * AGR_DEFINE as ACTIVITYGROUP - AGR_DEFINE is table name in SAP, ACTIVITYGROUP is his alias in connector
+     * * MANDT:3:IGNORE - MANDT is his first column with length 3 and in connector is ignored
+     * * AGR_NAME:30:KEY - AGR_NAME is his second column with length 30 and is his key (icfs:UID and also his icfs:NAME)
+     * * PARENT_AGR:30 - PARENT_AGR is his third column with length 30 characters
+     * * next columns are ignored
+     */
     private String[] tables = {"AGR_DEFINE as ACTIVITYGROUP=MANDT:3:IGNORE,AGR_NAME:30:KEY,PARENT_AGR:30", "USGRP as GROUP=MANDT:3:IGNORE,USERGROUP:12:KEY"};
 
+    /**
+     * this tables also have a simplified representation of his tables over his keys to comfortable use in mappings, for example ACTIVITYGROUPS.AGR_NAME
+     */
     private String[] tableParameterNames = {"PROFILES", "ACTIVITYGROUPS", "GROUPS"};
 
-    // what SAP table what columns and what lengt has
-    Map<String, Map<String, Integer>> tableMetadatas = new LinkedHashMap<String, Map<String, Integer>>();
-    // what columns are SAP table keys
-    Map<String, List<String>> tableKeys = new LinkedHashMap<String, List<String>>();
-    // what columns are ignored
-    Map<String, List<String>> tableIgnores = new LinkedHashMap<String, List<String>>();
-    // SAP table name to midPoint objectClass
-    Map<String, String> tableAliases = new LinkedHashMap<String, String>();
+    /**
+     * which SAP table which columns and which length has
+     */
+    private Map<String, Map<String, Integer>> tableMetadatas = new LinkedHashMap<String, Map<String, Integer>>();
+    /**
+     * which columns are in which SAP table keys
+     */
+    private Map<String, List<String>> tableKeys = new LinkedHashMap<String, List<String>>();
+    /**
+     * which columns are ignored
+     */
+    private Map<String, List<String>> tableIgnores = new LinkedHashMap<String, List<String>>();
+    /**
+     * SAP table name to midPoint objectClass mapping
+     */
+    private Map<String, String> tableAliases = new LinkedHashMap<String, String>();
 
     @Override
     public void validate() {
@@ -117,7 +162,7 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private void checkParameterNames() {
         // if empty, update length
-        if (tableParameterNames!=null && tableParameterNames.length==1 && "".equals(tableParameterNames[0])) {
+        if (tableParameterNames != null && tableParameterNames.length == 1 && "".equals(tableParameterNames[0])) {
             tableParameterNames = new String[0];
         }
 
@@ -128,15 +173,15 @@ public class SapConfiguration extends AbstractConfiguration {
                     ok = true;
                 }
             }
-            if (!ok){
-                throw new ConfigurationException("Parameter name "+ table+" not exists");
+            if (!ok) {
+                throw new ConfigurationException("Parameter name " + table + " not exists");
             }
         }
     }
 
     void parseTableDefinitions() {
         // if empty, update length
-        if (tables!=null && tables.length==1 && "".equals(tables[0])) {
+        if (tables != null && tables.length == 1 && "".equals(tables[0])) {
             tables = new String[0];
         }
 
@@ -182,8 +227,7 @@ public class SapConfiguration extends AbstractConfiguration {
                         String key = column[2];
                         if ("KEY".equalsIgnoreCase(key)) {
                             keys.add(columnName);
-                        }
-                        else if ("IGNORE".equalsIgnoreCase(key)) {
+                        } else if ("IGNORE".equalsIgnoreCase(key)) {
                             ignore.add(columnName);
                         }
                     }
@@ -211,15 +255,29 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", systemNumber='" + systemNumber + '\'' +
                 ", client='" + client + '\'' +
                 ", lang='" + lang + '\'' +
+                ", poolCapacity='" + poolCapacity + '\'' +
+                ", peakLimit='" + peakLimit + '\'' +
+                ", sncLibrary='" + sncLibrary + '\'' +
+                ", sncMode='" + sncMode + '\'' +
+                ", sncMyName='" + sncMyName + '\'' +
+                ", sncPartnerName='" + sncPartnerName + '\'' +
+                ", sncQoP='" + sncQoP + '\'' +
+                ", x509Cert='" + x509Cert + '\'' +
+                ", cpicTrace='" + cpicTrace + '\'' +
+                ", trace='" + trace + '\'' +
                 ", failWhenTruncating=" + failWhenTruncating +
                 ", failWhenWarning=" + failWhenWarning +
                 ", useTransaction=" + useTransaction +
                 ", testBapiFunctionPermission=" + testBapiFunctionPermission +
-                ", tables=" + Arrays.toString(tables) +
-                ", tableParameterNames=" + Arrays.toString(tableParameterNames) +
                 ", changePasswordAtNextLogon=" + changePasswordAtNextLogon +
                 ", alsoReadLoginInfo=" + alsoReadLoginInfo +
                 ", useNativeNames=" + useNativeNames +
+                ", tables=" + Arrays.toString(tables) +
+                ", tableParameterNames=" + Arrays.toString(tableParameterNames) +
+                ", tableMetadatas=" + tableMetadatas +
+                ", tableKeys=" + tableKeys +
+                ", tableIgnores=" + tableIgnores +
+                ", tableAliases=" + tableAliases +
                 '}';
     }
 
@@ -477,6 +535,26 @@ public class SapConfiguration extends AbstractConfiguration {
         this.x509Cert = x509Cert;
     }
 
+    @ConfigurationProperty(displayMessageKey = "sap.config.cpicTrace",
+            helpMessageKey = "sap.config.cpicTrace.help")
+    public String getCpicTrace() {
+        return cpicTrace;
+    }
+
+    public void setCpicTrace(String cpicTrace) {
+        this.cpicTrace = cpicTrace;
+    }
+
+    @ConfigurationProperty(displayMessageKey = "sap.config.trace",
+            helpMessageKey = "sap.config.trace.help")
+    public String getTrace() {
+        return trace;
+    }
+
+    public void setTrace(String trace) {
+        this.trace = trace;
+    }
+
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
         if (password != null) {
@@ -525,9 +603,29 @@ public class SapConfiguration extends AbstractConfiguration {
         if (isNotEmpty(x509Cert)) {
             connectProperties.setProperty(DestinationDataProvider.JCO_X509CERT, x509Cert);
         }
+        if (isNotEmpty(cpicTrace)) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_CPIC_TRACE, cpicTrace);
+        }
+        if (isNotEmpty(trace)) {
+            connectProperties.setProperty(DestinationDataProvider.JCO_TRACE, trace);
+        }
 
         return connectProperties;
     }
 
+    public Map<String, Map<String, Integer>> getTableMetadatas() {
+        return tableMetadatas;
+    }
 
+    public Map<String, List<String>> getTableKeys() {
+        return tableKeys;
+    }
+
+    public Map<String, List<String>> getTableIgnores() {
+        return tableIgnores;
+    }
+
+    public Map<String, String> getTableAliases() {
+        return tableAliases;
+    }
 }

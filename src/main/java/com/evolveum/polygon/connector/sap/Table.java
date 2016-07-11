@@ -31,14 +31,40 @@ import java.util.Set;
 
 /**
  * Created by gpalos on 2. 3. 2016.
+ *
+ * Table represents a JCOTable from SAP.
+ * ConnId framework don't support complex data types, we transfer each JCOTable lines to XML representation and send it as String value over ConnId.
+ * Each line (Item) is a value in multi value attribute and contains table header names from SAP with same names as represents in SAP and his values:
+ * <?xml version="1.0" encoding="UTF-8"?>
+ *     <item>
+ *          <column1name>column 1 value</column1name>
+ *          <column2name>column 2 value</column2name>
+ *     </item>
+ *
+ * Example representation of one line of ACTIVITYGROUPS:
+ * <?xml version="1.0" encoding="UTF-8"?>
+ *     <item>
+ *         <AGR_NAME>name of activity group</AGR_NAME>
+ *         <FROM_DAT>2016-06-07</FROM_DAT>
+ *         <TO_DAT>9999-12-31</TO_DAT>
+ *         <AGR_TEXT>description of activity group</AGR_TEXT>
+ *         <ORG_FLAG></ORG_FLAG>
+ *     </item>
+ *
+ * @see Item
  */
 public class Table {
     private static final Log LOG = Log.getLog(Table.class);
 
-    List<Item> values = new LinkedList<Item>();
+    /**
+     * lines in table represented as Item
+     */
+    private List<Item> values = new LinkedList<Item>();
 
-    // if Table is not null, modify
-    boolean modify = false;
+    /**
+     * need to update
+     */
+    private boolean update = false;
 
     public Table(JCoTable agt) throws TransformerException, ParserConfigurationException {
         agt.firstRow();
@@ -55,7 +81,7 @@ public class Table {
         List<Object> items = null;
         for (Attribute attr : attributes) {
             if (attr.getName().startsWith(attrName)) {
-                modify = true;
+                update = true;
                 items = attr.getValue();
                 if (items != null) {
                     for (int i = 0; i < items.size(); i++) {
@@ -70,7 +96,7 @@ public class Table {
             }
         }
 
-        LOG.ok("items in input: {0}, in output: {1}, modify: {2} for attribute {3}", items, values, modify, attrName);
+        LOG.ok("items in input: {0}, in output: {1}, update: {2} for attribute {3}", items, values, update, attrName);
 
     }
 
@@ -94,7 +120,7 @@ public class Table {
     @Override
     public String toString() {
         return "Table{" +
-                "modify=" + modify +
+                "update=" + update +
                 ", values=" + values +
                 '}';
     }
@@ -102,5 +128,13 @@ public class Table {
 
     public int size() {
         return this.values.size();
+    }
+
+    public List<Item> getValues() {
+        return values;
+    }
+
+    public boolean isUpdate() {
+        return update;
     }
 }

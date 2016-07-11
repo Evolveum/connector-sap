@@ -44,12 +44,25 @@ import java.util.Map;
 
 /**
  * Created by gpalos on 2. 3. 2016.
+ *
+ * Item represents one line from SAP JCOTable containing his all JCoField (column name and his value).
+ *
+ * @see Table
  */
 public class Item {
 
+    /**
+     * all column names and his value for all JCoField in one JCOTable line
+     */
     private Map<String, String> values = new LinkedHashMap<String, String>();
 
+    /**
+     * raw XML data
+     */
     private String data;
+    /**
+     * raw datas are XML data with all his columns, or only simlified data containing his keys without XML wrapper elements
+     */
     private boolean isXml;
 
     private static final String ITEM_NAME = "item";
@@ -86,8 +99,8 @@ public class Item {
             doc.getDocumentElement().normalize();
 
             NodeList root = doc.getElementsByTagName(ITEM_NAME);
-            if (root.getLength()!=1)
-                throw new ConfigurationException("needed "+ITEM_NAME+", but not found in: "+data);
+            if (root.getLength() != 1)
+                throw new ConfigurationException("needed " + ITEM_NAME + ", but not found in: " + data);
 
             NodeList nodeList = root.item(0).getChildNodes();
             for (int i = 0; i < nodeList.getLength(); i++) {
@@ -96,33 +109,11 @@ public class Item {
                     values.put(node.getNodeName(), node.getTextContent());
                 }
             }
-        }
-        else {
+        } else {
             // only key
             values.put(SapConnector.TABLETYPE_PARAMETER_KEYS.get(keyAttributeName), data);
         }
     }
-
-
-    /*
-    public Item(JCoTable agt) throws ParserConfigurationException, TransformerException {
-        StringBuffer sb = new StringBuffer();
-        sb.append("<?data version=\"1.0\" encoding=\"UTF-8\"?><"+ITEM_NAME+">");
-
-        Iterator<JCoField> iter = agt.iterator();
-        while (iter.hasNext()) {
-            JCoField field = iter.next();
-            String name = field.getName();
-
-            sb.append("<"+name+">"+ StringEscapeUtils.escapeXml(field.getString())+"</"+name+">");
-
-            values.put(name, field.getString());
-        }
-
-        sb.append("</"+ITEM_NAME+">");
-
-        this.data = sb.toString();
-    }*/
 
     public Item(JCoTable agt) throws ParserConfigurationException, TransformerException {
         Document doc = loader.newDocument();
@@ -146,8 +137,7 @@ public class Item {
         this.data = result.getWriter().toString();
     }
 
-    public Map<String, String> getValues()
-    {
+    public Map<String, String> getValues() {
         return values;
     }
 
@@ -166,7 +156,6 @@ public class Item {
     public String getByAttribute(String attribute) {
         return values.get(attribute);
     }
-
 
 
 }

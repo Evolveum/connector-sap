@@ -20,23 +20,20 @@ import com.sap.conn.jco.ext.DestinationDataEventListener;
 import com.sap.conn.jco.ext.DestinationDataProvider;
 
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Properties;
 
 /**
  * Created by gpalos on 19. 1. 2016.
+ *
+ * The custom destination data provider implements DestinationDataProvider and
+ * provides an implementation for at least getDestinationProperties(String).
  */
-//The custom destination data provider implements DestinationDataProvider and
-//provides an implementation for at least getDestinationProperties(String).
-//Whenever possible the implementation should support events and notify the JCo runtime
-//if a destination is being created, changed, or deleted. Otherwise JCo runtime
-//will check regularly if a cached destination configuration is still valid which incurs
-//a performance penalty.
 class CustomDestinationDataProvider implements DestinationDataProvider {
 
     private static final CustomDestinationDataProvider INSTANCE = new CustomDestinationDataProvider();
     private static int lastId = 0;
+
     private CustomDestinationDataProvider() {
     }
 
@@ -65,4 +62,4 @@ class CustomDestinationDataProvider implements DestinationDataProvider {
         return false;
     }
 
-} // end of CustomDestinationDataProvider
+}

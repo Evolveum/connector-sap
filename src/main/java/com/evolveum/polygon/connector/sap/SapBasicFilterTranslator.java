@@ -21,21 +21,20 @@ import org.identityconnectors.framework.common.objects.Attribute;
 import org.identityconnectors.framework.common.objects.Name;
 import org.identityconnectors.framework.common.objects.Uid;
 import org.identityconnectors.framework.common.objects.filter.AbstractFilterTranslator;
-import org.identityconnectors.framework.common.objects.filter.ContainsFilter;
 import org.identityconnectors.framework.common.objects.filter.EqualsFilter;
 
 /**
- * Created by gpalos on 21. 1. 2016.
+ * Created by gpalos on 4. 7. 2016.
  */
-public class SapFilterTranslator extends AbstractFilterTranslator<SapFilter> {
-    private static final Log LOG = Log.getLog(SapFilterTranslator.class);
+public class SapBasicFilterTranslator extends AbstractFilterTranslator<SapFilter> {
+    private static final Log LOG = Log.getLog(SapBasicFilterTranslator.class);
 
     @Override
     protected SapFilter createEqualsExpression(EqualsFilter filter, boolean not) {
         LOG.ok("createEqualsExpression, filter: {0}, not: {1}", filter, not);
 
         if (not) {
-            return null;            // not supported
+            return null;            // not supported attribute
         }
 
         Attribute attr = filter.getAttribute();
@@ -43,42 +42,12 @@ public class SapFilterTranslator extends AbstractFilterTranslator<SapFilter> {
         // filter by NAME is the same as by UID
         if (Name.NAME.equals(attr.getName()) || Uid.NAME.equals(attr.getName())) {
             if (attr.getValue() != null && attr.getValue().get(0) != null) {
-                SapFilter lf = new SapFilter();
-                lf.setByName(String.valueOf(attr.getValue().get(0)));
+                SapFilter lf = new SapFilter(String.valueOf(attr.getValue().get(0)));
                 return lf;
             }
         }
 
-        return null;            // not supported
+        return null;            // not supported attribute
     }
-
-    @Override
-    protected SapFilter createContainsExpression(ContainsFilter filter, boolean not) {
-        LOG.ok("createContainsExpression, filter: {0}, not: {1}", filter, not);
-
-        if (not) {
-            return null;            // not supported
-        }
-
-        Attribute attr = filter.getAttribute();
-        LOG.ok("attr.getId:  {0}, attr.getValue: {1}", attr.getName(), attr.getValue());
-        if (Name.NAME.equals(attr.getName())) {
-            if (attr.getValue() != null && attr.getValue().get(0) != null) {
-                SapFilter lf = new SapFilter();
-                lf.setByNameContains(String.valueOf(attr.getValue().get(0)));
-                return lf;
-            }
-        }
-
-        return null;            // not supported
-    }
-
-//    protected T createAndExpression(T leftExpression, T rightExpression) {
-//        return null;
-//    }
-//
-//    protected T createOrExpression(T leftExpression, T rightExpression) {
-//        return null;
-//    }
 
 }
