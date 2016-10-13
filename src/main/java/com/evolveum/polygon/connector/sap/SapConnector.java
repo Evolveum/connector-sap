@@ -32,7 +32,11 @@ import org.identityconnectors.framework.spi.operations.*;
 
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.TransformerException;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -165,7 +169,13 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         }
         String propertiesId = CustomDestinationDataProvider.getNextId();
         //set properties for the destination
-        myProvider.setDestinationProperties(propertiesId, ((SapConfiguration) configuration).getDestinationProperties());
+        Properties props = this.configuration.getDestinationProperties();
+
+        if (this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
+            createDestinationDataFile(propertiesId, props);
+        }
+
+        myProvider.setDestinationProperties(propertiesId, props);
 
         // create destination & ping it
         try {
@@ -183,10 +193,48 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
         LOG.info("Initialization finished");
     }
 
+    private void createDestinationDataFile(String destinationName, Properties connectProperties)
+    {
+        String fileName = destinationName+".jcoDestination";
+        try
+        {
+            File destCfg = new File(fileName);
+            destCfg.deleteOnExit(); // only temporary files
+            FileOutputStream fos = new FileOutputStream(destCfg,false);
+            connectProperties.store(fos, "for tests only !");
+            fos.close();
+            LOG.ok("destination file was created: "+destCfg.getName()+", "+destCfg.getAbsolutePath());
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException("Unable to create the destination file: "+fileName, e);
+        }
+    }
+
+    private void deleteDestinationDataFile(String destinationName)
+    {
+        String fileName = destinationName+".jcoDestination";
+        try
+        {
+            File destCfg = new File(fileName);
+            boolean deleted = destCfg.delete();
+            if (deleted) {
+                LOG.ok("destination file was deleted: " + destCfg.getName() + ", " + destCfg.getAbsolutePath());
+            }
+        }
+        catch (Exception e)
+        {
+            LOG.warn("Unable to delete the destination file: "+fileName, e);
+        }
+    }
+
     @Override
     public void dispose() {
         this.configuration = null;
         if ((this.destination != null) && (JCoContext.isStateful(this.destination))) {
+            if (this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
+                deleteDestinationDataFile(this.destination.getDestinationName());
+            }
             try {
                 JCoContext.end(this.destination);
             } catch (JCoException jcoe) {

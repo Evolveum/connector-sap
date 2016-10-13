@@ -59,6 +59,8 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private String sncMode = "0";
 
+    public static final String SNC_MODE_ON = "1";
+
     private String sncMyName = null;
 
     private String sncPartnerName = null;
@@ -281,7 +283,7 @@ public class SapConfiguration extends AbstractConfiguration {
                 '}';
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.host",
+    @ConfigurationProperty(order = 1, displayMessageKey = "sap.config.host",
             helpMessageKey = "sap.config.host.help")
     public String getHost() {
         return host;
@@ -291,7 +293,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.host = host;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.port",
+    @ConfigurationProperty(order = 2, displayMessageKey = "sap.config.port",
             helpMessageKey = "sap.config.port.help")
     public String getPort() {
         return port;
@@ -301,7 +303,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.port = port;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.user",
+    @ConfigurationProperty(order = 3, displayMessageKey = "sap.config.user",
             helpMessageKey = "sap.config.user.help")
     public String getUser() {
         return user;
@@ -311,7 +313,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.user = user;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.password",
+    @ConfigurationProperty(order = 4, displayMessageKey = "sap.config.password",
             helpMessageKey = "sap.config.password.help")
     public GuardedString getPassword() {
         return password;
@@ -325,7 +327,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.password = new GuardedString(plainPassword.toCharArray());
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.systemId",
+    @ConfigurationProperty(order = 5, displayMessageKey = "sap.config.systemId",
             helpMessageKey = "sap.config.systemId.help")
     public String getSystemId() {
         return systemId;
@@ -335,7 +337,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.systemId = systemId;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.systemNumber",
+    @ConfigurationProperty(order = 6, displayMessageKey = "sap.config.systemNumber",
             helpMessageKey = "sap.config.systemNumber.help")
     public String getSystemNumber() {
         return systemNumber;
@@ -345,7 +347,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.systemNumber = systemNumber;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.client",
+    @ConfigurationProperty(order = 7, displayMessageKey = "sap.config.client",
             helpMessageKey = "sap.config.client.help")
     public String getClient() {
         return client;
@@ -355,7 +357,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.client = client;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.lang",
+    @ConfigurationProperty(order = 8, displayMessageKey = "sap.config.lang",
             helpMessageKey = "sap.config.lang.help")
     public String getLang() {
         return lang;
@@ -365,8 +367,8 @@ public class SapConfiguration extends AbstractConfiguration {
         this.lang = lang;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.setFailWhenTruncating",
-            helpMessageKey = "sap.config.setFailWhenTruncating.help")
+    @ConfigurationProperty(order = 9, displayMessageKey = "sap.config.failWhenTruncating",
+            helpMessageKey = "sap.config.failWhenTruncating.help")
     public Boolean getFailWhenTruncating() {
         return failWhenTruncating;
     }
@@ -375,8 +377,8 @@ public class SapConfiguration extends AbstractConfiguration {
         this.failWhenTruncating = failWhenTruncating;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.getFailWhenWarning",
-            helpMessageKey = "sap.config.getFailWhenWarning.help")
+    @ConfigurationProperty(order = 10, displayMessageKey = "sap.config.failWhenWarning",
+            helpMessageKey = "sap.config.failWhenWarning.help")
     public Boolean getFailWhenWarning() {
         return failWhenWarning;
     }
@@ -385,7 +387,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.failWhenWarning = failWhenWarning;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.useTransaction",
+    @ConfigurationProperty(order = 11, displayMessageKey = "sap.config.useTransaction",
             helpMessageKey = "sap.config.useTransaction.help")
     public Boolean getUseTransaction() {
         return useTransaction;
@@ -395,7 +397,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.useTransaction = useTransaction;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.testBapiFunctionPermission",
+    @ConfigurationProperty(order = 12, displayMessageKey = "sap.config.testBapiFunctionPermission",
             helpMessageKey = "sap.config.testBapiFunctionPermission.help")
     public Boolean getTestBapiFunctionPermission() {
         return testBapiFunctionPermission;
@@ -405,7 +407,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.testBapiFunctionPermission = testBapiFunctionPermission;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.tables",
+    @ConfigurationProperty(order = 13, displayMessageKey = "sap.config.tables",
             helpMessageKey = "sap.config.tables.help")
     public String[] getTables() {
         return tables;
@@ -415,7 +417,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.tables = tables;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.tableParameterNames",
+    @ConfigurationProperty(order = 14, displayMessageKey = "sap.config.tableParameterNames",
             helpMessageKey = "sap.config.tableParameterNames.help")
     public String[] getTableParameterNames() {
         return tableParameterNames;
@@ -425,7 +427,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.tableParameterNames = tableParameterNames;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.changePasswordAtNextLogon",
+    @ConfigurationProperty(order = 15, displayMessageKey = "sap.config.changePasswordAtNextLogon",
             helpMessageKey = "sap.config.changePasswordAtNextLogon.help")
     public Boolean getChangePasswordAtNextLogon() {
         return changePasswordAtNextLogon;
@@ -435,7 +437,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.changePasswordAtNextLogon = changePasswordAtNextLogon;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.alsoReadLoginInfo",
+    @ConfigurationProperty(order = 16, displayMessageKey = "sap.config.alsoReadLoginInfo",
             helpMessageKey = "sap.config.alsoReadLoginInfo.help")
     public Boolean getAlsoReadLoginInfo() {
         return alsoReadLoginInfo;
@@ -445,7 +447,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.alsoReadLoginInfo = alsoReadLoginInfo;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.useNativeNames",
+    @ConfigurationProperty(order = 17, displayMessageKey = "sap.config.useNativeNames",
             helpMessageKey = "sap.config.useNativeNames.help")
     public Boolean getUseNativeNames() {
         return useNativeNames;
@@ -455,7 +457,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.useNativeNames = useNativeNames;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.poolCapacity",
+    @ConfigurationProperty(order = 18, displayMessageKey = "sap.config.poolCapacity",
             helpMessageKey = "sap.config.poolCapacity.help")
     public String getPoolCapacity() {
         return poolCapacity;
@@ -465,7 +467,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.poolCapacity = poolCapacity;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.peakLimit",
+    @ConfigurationProperty(order = 19, displayMessageKey = "sap.config.peakLimit",
             helpMessageKey = "sap.config.peakLimit.help")
     public String getPeakLimit() {
         return peakLimit;
@@ -475,7 +477,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.peakLimit = peakLimit;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.sncLibrary",
+    @ConfigurationProperty(order = 20, displayMessageKey = "sap.config.sncLibrary",
             helpMessageKey = "sap.config.sncLibrary.help")
     public String getSncLibrary() {
         return sncLibrary;
@@ -485,7 +487,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.sncLibrary = sncLibrary;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.sncMode",
+    @ConfigurationProperty(order = 21, displayMessageKey = "sap.config.sncMode",
             helpMessageKey = "sap.config.sncMode.help")
     public String getSncMode() {
         return sncMode;
@@ -495,7 +497,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.sncMode = sncMode;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.sncMyName",
+    @ConfigurationProperty(order = 22, displayMessageKey = "sap.config.sncMyName",
             helpMessageKey = "sap.config.sncMyName.help")
     public String getSncMyName() {
         return sncMyName;
@@ -505,7 +507,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.sncMyName = sncMyName;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.sncPartnerName",
+    @ConfigurationProperty(order = 23, displayMessageKey = "sap.config.sncPartnerName",
             helpMessageKey = "sap.config.sncPartnerName.help")
     public String getSncPartnerName() {
         return sncPartnerName;
@@ -515,7 +517,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.sncPartnerName = sncPartnerName;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.sncQoP",
+    @ConfigurationProperty(order = 24, displayMessageKey = "sap.config.sncQoP",
             helpMessageKey = "sap.config.sncQoP.help")
     public String getSncQoP() {
         return sncQoP;
@@ -525,7 +527,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.sncQoP = sncQoP;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.x509Cert",
+    @ConfigurationProperty(order = 25, displayMessageKey = "sap.config.x509Cert",
             helpMessageKey = "sap.config.x509Cert.help")
     public String getX509Cert() {
         return x509Cert;
@@ -535,7 +537,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.x509Cert = x509Cert;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.cpicTrace",
+    @ConfigurationProperty(order = 26, displayMessageKey = "sap.config.cpicTrace",
             helpMessageKey = "sap.config.cpicTrace.help")
     public String getCpicTrace() {
         return cpicTrace;
@@ -545,7 +547,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.cpicTrace = cpicTrace;
     }
 
-    @ConfigurationProperty(displayMessageKey = "sap.config.trace",
+    @ConfigurationProperty(order = 27, displayMessageKey = "sap.config.trace",
             helpMessageKey = "sap.config.trace.help")
     public String getTrace() {
         return trace;

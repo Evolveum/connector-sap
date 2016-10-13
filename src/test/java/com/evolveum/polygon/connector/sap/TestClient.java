@@ -48,6 +48,11 @@ public class TestClient {
     public static void setUp() throws Exception {
         // load configuration from properties file
         String fileName = "test.properties";
+        setUp(fileName);
+    }
+
+    private static void setUp(String fileName) throws Exception {
+        LOG.info("reading configuration from file: "+fileName);
         sapConfiguration = readSapConfigurationFromFile(fileName);
 
         sapConnector = new SapConnector();
@@ -84,6 +89,27 @@ public class TestClient {
         sapConfiguration.setClient(properties.getProperty("client"));
         if (properties.containsKey("lang")) {
             sapConfiguration.setLang(properties.getProperty("lang"));
+        }
+        if (properties.containsKey("sncMode")) {
+            sapConfiguration.setSncMode(properties.getProperty("sncMode"));
+        }
+        if (properties.containsKey("sncMyName")) {
+            sapConfiguration.setSncMyName(properties.getProperty("sncMyName"));
+        }
+        if (properties.containsKey("sncLibrary")) {
+            sapConfiguration.setSncLibrary(properties.getProperty("sncLibrary"));
+        }
+        if (properties.containsKey("sncPartnerName")) {
+            sapConfiguration.setSncPartnerName(properties.getProperty("sncPartnerName"));
+        }
+        if (properties.containsKey("sncQoP")) {
+            sapConfiguration.setSncQoP(properties.getProperty("sncQoP"));
+        }
+        if (properties.containsKey("cpicTrace")) {
+            sapConfiguration.setCpicTrace(properties.getProperty("cpicTrace"));
+        }
+        if (properties.containsKey("trace")) {
+            sapConfiguration.setTrace(properties.getProperty("trace"));
         }
         if (properties.containsKey("failWhenTruncating")) {
             sapConfiguration.setFailWhenTruncating(Boolean.parseBoolean(properties.getProperty("failWhenTruncating")));
@@ -1277,6 +1303,20 @@ public class TestClient {
         LOG.info("number of users found: "+found[0]);
 
         Assert.assertTrue(found[0]>6, "Not enougth user found: "+found[0]);
+    }
+
+    public static void main(String[] args) throws Exception {
+        if (args.length==1) {
+            setUp(args[0]);
+        }
+        else {
+            setUp("testSnc.properties");
+        }
+
+        TestClient tc = new TestClient();
+        tc.testConn();
+
+        tearDown();
     }
 }
 
