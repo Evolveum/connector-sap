@@ -232,7 +232,7 @@ public class TestClient {
 
     @Test(dependsOnMethods = {"testCreateFull"})
     public void testFindContains() throws RemoteException {
-        String value = SapFilter.ANY_NUMBER_OF_CHARACTERS + "volv" + SapFilter.ANY_NUMBER_OF_CHARACTERS; // evolveum
+        String value = SapFilter.ANY_NUMBER_OF_CHARACTERS + "vol" + SapFilter.ANY_NUMBER_OF_CHARACTERS; // evolveum
         SapFilter query = new SapFilter(SapFilter.OPERATOR_CONTAINS_PATTERN, SapConnector.USERNAME, value);
 
         final boolean[] found = {false};
