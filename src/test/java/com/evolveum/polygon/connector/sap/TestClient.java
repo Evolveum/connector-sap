@@ -42,7 +42,7 @@ public class TestClient {
     /**
      * test user name
      */
-    static final String USER_NAME = "Evolveum";
+    static final String USER_NAME = "Evol-1";
 
     @BeforeClass
     public static void setUp() throws Exception {
@@ -639,7 +639,7 @@ public class TestClient {
         attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
 
         String township = "read_only";
-        String alias = "ALIAS";
+        String alias = USER_NAME+"_ALIAS";
         attributes.add(AttributeBuilder.build("ADDRESS.TOWNSHIP", township));
         attributes.add(AttributeBuilder.build("ALIAS.USERALIAS", alias));
 
@@ -670,7 +670,7 @@ public class TestClient {
         Assert.assertEquals(user.getAttributeByName("ADDRESS.TOWNSHIP"), null);
 
         // alias is updateable over ALIASX.BAPIALIAS
-        Assert.assertEquals(user.getAttributeByName("ALIAS.USERALIAS").getValue().get(0), alias);
+        Assert.assertEquals(user.getAttributeByName("ALIAS.USERALIAS").getValue().get(0), alias.toUpperCase());
 
     }
 
