@@ -16,6 +16,7 @@
 
 package com.evolveum.polygon.connector.sap;
 
+import com.sap.conn.jco.JCo;
 import com.sap.conn.jco.ext.DestinationDataProvider;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
@@ -72,6 +73,10 @@ public class SapConfiguration extends AbstractConfiguration {
     private String cpicTrace = null;
 
     private String trace = null;
+
+    private String traceLevel = "0";
+    
+    private String tracePath = null;
 
     /**
      * throw exception when data will be truncated in SAP and not fit to actual atribute size
@@ -557,6 +562,26 @@ public class SapConfiguration extends AbstractConfiguration {
         this.trace = trace;
     }
 
+    @ConfigurationProperty(order = 28, displayMessageKey = "sap.config.traceLevel",
+            helpMessageKey = "sap.config.traceLevel.help")
+    public String getTraceLevel() {
+        return traceLevel;
+    }
+
+    public void setTraceLevel(String traceLevel) {
+        this.traceLevel = traceLevel;
+    }
+    
+    @ConfigurationProperty(order = 29, displayMessageKey = "sap.config.tracePath",
+            helpMessageKey = "sap.config.tracePath.help")
+    public String getTracePath() {
+        return tracePath;
+    }
+
+    public void setTracePath(String tracePath) {
+        this.tracePath = tracePath;
+    }
+
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
         if (password != null) {
@@ -611,6 +636,9 @@ public class SapConfiguration extends AbstractConfiguration {
         if (isNotEmpty(trace)) {
             connectProperties.setProperty(DestinationDataProvider.JCO_TRACE, trace);
         }
+
+        JCo.setProperty("jco.trace_path", tracePath);
+        JCo.setProperty("jco.trace_level", traceLevel);       
 
         return connectProperties;
     }
