@@ -28,6 +28,7 @@ import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
 import org.identityconnectors.framework.spi.Connector;
 import org.identityconnectors.framework.spi.ConnectorClass;
+import org.identityconnectors.framework.spi.PoolableConnector;
 import org.identityconnectors.framework.spi.operations.*;
 
 import javax.xml.parsers.ParserConfigurationException;
@@ -42,7 +43,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 
 @ConnectorClass(displayNameKey = "sap.connector.display", configurationClass = SapConfiguration.class)
-public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFilter>, CreateOp, DeleteOp, UpdateOp,
+public class SapConnector implements PoolableConnector, TestOp, SchemaOp, SearchOp<SapFilter>, CreateOp, DeleteOp, UpdateOp,
         SyncOp, ScriptOnConnectorOp {
 
     private static final Log LOG = Log.getLog(SapConnector.class);
@@ -167,15 +168,21 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
             //stop the execution
             throw new ConnectorIOException(providerAlreadyRegisteredException.getMessage(), providerAlreadyRegisteredException);
         }
-        String propertiesId = CustomDestinationDataProvider.getNextId();
-        //set properties for the destination
+
+        //properties for destination from config
         Properties props = this.configuration.getDestinationProperties();
+
+        String propertiesId = this.configuration.getSystemId()+this.configuration.getSystemNumber()+this.configuration.getClient();
+
+        Properties destProps = myProvider.getDestinationProperties(propertiesId);
+        if (destProps == null || !destProps.equals(props)){
+            myProvider.setDestinationProperties(propertiesId, props);
+        }
+
 
         if (this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
             createDestinationDataFile(propertiesId, props);
         }
-
-        myProvider.setDestinationProperties(propertiesId, props);
 
         // create destination & ping it
         try {
@@ -192,6 +199,23 @@ public class SapConnector implements Connector, TestOp, SchemaOp, SearchOp<SapFi
 
         LOG.info("Initialization finished");
     }
+
+
+    @Override
+    public void checkAlive() {
+        if (this.destination == null || !this.destination.isValid()) {
+            LOG.ok("check alive: FAILED");
+            throw new ConnectorException("Connection check failed");
+        }
+        try {
+            this.destination.ping();
+        } catch (JCoException e) {
+            LOG.ok("connection ping FAILED: "+e);
+            throw new ConnectorException("Connection ping failed", e);
+        }
+        LOG.ok("check alive: OK");
+    }
+
 
     private void createDestinationDataFile(String destinationName, Properties connectProperties)
     {

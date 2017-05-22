@@ -31,18 +31,21 @@ import java.util.Properties;
  */
 class CustomDestinationDataProvider implements DestinationDataProvider {
 
+
     private static final CustomDestinationDataProvider INSTANCE = new CustomDestinationDataProvider();
-    private static int lastId = 0;
+    private DestinationDataEventListener eL;
 
     private CustomDestinationDataProvider() {
     }
 
     public static CustomDestinationDataProvider getInstance() {
+        /*
+        try {
+            com.sap.conn.jco.ext.Environment.registerDestinationDataProvider(INSTANCE);
+        } catch (IllegalStateException providerAlreadyRegisteredException) {
+            //somebody else registered its implementation,
+        }*/
         return INSTANCE;
-    }
-
-    public synchronized static String getNextId() {
-        return String.valueOf(++lastId);
     }
 
     private Map<String, Properties> propertiesMap = new HashMap<String, Properties>();
@@ -56,10 +59,11 @@ class CustomDestinationDataProvider implements DestinationDataProvider {
     }
 
     public void setDestinationDataEventListener(DestinationDataEventListener eventListener) {
+        this.eL = eventListener;
     }
 
     public boolean supportsEvents() {
-        return false;
+        return true;
     }
 
 }
