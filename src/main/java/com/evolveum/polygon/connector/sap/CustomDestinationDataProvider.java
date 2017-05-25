@@ -56,6 +56,10 @@ class CustomDestinationDataProvider implements DestinationDataProvider {
 
     public void setDestinationProperties(String destinationName, Properties properties) {
         propertiesMap.put(destinationName, properties);
+
+        if(this.eL != null) {
+            this.eL.updated(destinationName);
+        }
     }
 
     public void setDestinationDataEventListener(DestinationDataEventListener eventListener) {

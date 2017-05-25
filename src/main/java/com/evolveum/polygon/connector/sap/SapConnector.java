@@ -172,21 +172,21 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         //properties for destination from config
         Properties props = this.configuration.getDestinationProperties();
 
-        String propertiesId = this.configuration.getSystemId()+this.configuration.getSystemNumber()+this.configuration.getClient();
+        String destinationName = this.configuration.getFinalDestinationName();
 
-        Properties destProps = myProvider.getDestinationProperties(propertiesId);
+        Properties destProps = myProvider.getDestinationProperties(destinationName);
         if (destProps == null || !destProps.equals(props)){
-            myProvider.setDestinationProperties(propertiesId, props);
+            myProvider.setDestinationProperties(destinationName, props);
         }
 
 
         if (this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
-            createDestinationDataFile(propertiesId, props);
+            createDestinationDataFile(destinationName, props);
         }
 
         // create destination & ping it
         try {
-            this.destination = JCoDestinationManager.getDestination(propertiesId);
+            this.destination = JCoDestinationManager.getDestination(destinationName);
             this.destination.ping();
         } catch (JCoException e) {
             throw new ConnectorIOException(e.getMessage(), e);

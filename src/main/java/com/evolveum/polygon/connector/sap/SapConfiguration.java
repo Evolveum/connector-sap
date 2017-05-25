@@ -50,6 +50,8 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private String client;
 
+    private String destinationName;
+
     private String lang = "EN";
 
     private String poolCapacity = "1";
@@ -261,6 +263,7 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", systemId='" + systemId + '\'' +
                 ", systemNumber='" + systemNumber + '\'' +
                 ", client='" + client + '\'' +
+                ", destinationName='" + destinationName + '\'' +
                 ", lang='" + lang + '\'' +
                 ", poolCapacity='" + poolCapacity + '\'' +
                 ", peakLimit='" + peakLimit + '\'' +
@@ -360,6 +363,23 @@ public class SapConfiguration extends AbstractConfiguration {
 
     public void setClient(String client) {
         this.client = client;
+    }
+
+    @ConfigurationProperty(order = 7, displayMessageKey = "sap.config.destinationName",
+            helpMessageKey = "sap.config.destinationName.help")
+    public String getDestinationName() {
+        return destinationName;
+    }
+
+    public String getFinalDestinationName() {
+        if (isNotEmpty(destinationName))
+            return destinationName;
+
+        return getSystemId()+getSystemNumber()+getClient()+getUser();
+    }
+
+    public void setDestinationName(String destinationName) {
+        this.destinationName = destinationName;
     }
 
     @ConfigurationProperty(order = 8, displayMessageKey = "sap.config.lang",
@@ -636,9 +656,12 @@ public class SapConfiguration extends AbstractConfiguration {
         if (isNotEmpty(trace)) {
             connectProperties.setProperty(DestinationDataProvider.JCO_TRACE, trace);
         }
-
-        JCo.setProperty("jco.trace_path", tracePath);
-        JCo.setProperty("jco.trace_level", traceLevel);       
+        if (isNotEmpty(tracePath)) {
+            JCo.setProperty("jco.trace_path", tracePath);
+        }
+        if (isNotEmpty(traceLevel)) {
+            JCo.setProperty("jco.trace_level", traceLevel);
+        }
 
         return connectProperties;
     }
