@@ -656,10 +656,10 @@ public class SapConfiguration extends AbstractConfiguration {
         if (isNotEmpty(trace)) {
             connectProperties.setProperty(DestinationDataProvider.JCO_TRACE, trace);
         }
-        if (isNotEmpty(tracePath)) {
+        if (tracePath != null) {
             JCo.setProperty("jco.trace_path", tracePath);
         }
-        if (isNotEmpty(traceLevel)) {
+        if (traceLevel != null) {
             JCo.setProperty("jco.trace_level", traceLevel);
         }
 
