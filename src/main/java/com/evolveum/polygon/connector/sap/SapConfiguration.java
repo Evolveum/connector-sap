@@ -131,6 +131,11 @@ public class SapConfiguration extends AbstractConfiguration {
     private String[] tableParameterNames = {"PROFILES", "ACTIVITYGROUPS", "GROUPS"};
 
     /**
+     * this params are set as read only params for the connection to restrict what could be read , for example ISLOCKED", "LASTMODIFIED", "SNC", "ADMINDATA", "IDENTITY"
+     */
+    private String[] readOnlyParams = {};
+
+    /**
      * which SAP table which columns and which length has
      */
     private Map<String, Map<String, Integer>> tableMetadatas = new LinkedHashMap<String, Map<String, Integer>>();
@@ -162,6 +167,15 @@ public class SapConfiguration extends AbstractConfiguration {
         }
         if (client == null) {
             throw new ConfigurationException("client is empty");
+        }
+        if(readOnlyParams.length > 0)
+        {
+        	for (String readOnlyParam : readOnlyParams) {
+				if (!Arrays.asList(SapConnector.READ_ONLY_PARAMETERS).contains(readOnlyParam)) {
+					throw new ConfigurationException("parameter" + readOnlyParam + "is invalid");
+					//TODO - validate over full list of valid params? 
+				}
+			}
         }
 
         parseTableDefinitions();
@@ -275,6 +289,7 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", x509Cert='" + x509Cert + '\'' +
                 ", cpicTrace='" + cpicTrace + '\'' +
                 ", trace='" + trace + '\'' +
+                ", readOnlyParams='" + Arrays.toString(readOnlyParams) + '\'' +
                 ", failWhenTruncating=" + failWhenTruncating +
                 ", failWhenWarning=" + failWhenWarning +
                 ", useTransaction=" + useTransaction +
@@ -600,6 +615,16 @@ public class SapConfiguration extends AbstractConfiguration {
 
     public void setTracePath(String tracePath) {
         this.tracePath = tracePath;
+    }
+    
+    @ConfigurationProperty(order = 29, displayMessageKey = "sap.config.read.only.params",
+            helpMessageKey = "sap.config.read.only.params.help")
+    public String[] getReadOnlyParams() {
+        return readOnlyParams;
+    }
+    
+    public void setReadOnlyParams(String[] readOnlyParams) {
+    	this.readOnlyParams = readOnlyParams;
     }
 
     private String getPlainPassword() {
