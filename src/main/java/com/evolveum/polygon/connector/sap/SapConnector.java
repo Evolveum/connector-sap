@@ -91,7 +91,9 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     // these "Paremeter name"-s we can read and write in Type "Exporting"
     private static final String[] READ_WRITE_PARAMETERS = {"ADDRESS", "DEFAULTS", "UCLASS", "LOGONDATA", "ALIAS", "COMPANY", "REF_USER"};
     // these "Paremeter name"-s we can only read (don't have appropirade parameters in BAPI_USER_CHANGE)
-    private static final String[] READ_ONLY_PARAMETERS = {"ISLOCKED", "LASTMODIFIED", "SNC", "ADMINDATA", "IDENTITY"};
+    static final String[] READ_ONLY_PARAMETERS = {"ISLOCKED", "LASTMODIFIED", "SNC", "ADMINDATA", "IDENTITY"};
+    // variable version of READ_ONLY_PARAMETERS that could be set through connector configuration
+    private String[] readOnlyParams;
     // these attributes in "ADDRESS" parameter name we can't update, only set, because "ADDRESSX" in BAPI_USER_CHANGE don't contains these fiels
     private static final String[] CREATE_ONLY_ATTRIBUTES = {"ADDRESS" + SEPARATOR + "COUNTY_CODE", "ADDRESS" + SEPARATOR + "COUNTY",
             "ADDRESS" + SEPARATOR + "TOWNSHIP_CODE", "ADDRESS" + SEPARATOR + "TOWNSHIP", "DEFAULTS" + SEPARATOR + "CATTKENNZ"};
@@ -178,7 +180,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         if (destProps == null || !destProps.equals(props)){
             myProvider.setDestinationProperties(destinationName, props);
         }
-
+        // set read only parameters from gui connector configuration
+        readOnlyParams =  this.configuration.getReadOnlyParams();
 
         if (this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
             createDestinationDataFile(destinationName, props);
@@ -314,7 +317,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         try {
             String function = "BAPI_USER_GET_DETAIL";
             getSchemaFromBapiFunction(function, READ_WRITE_PARAMETERS, objClassBuilder, false);
-            getSchemaFromBapiFunction(function, READ_ONLY_PARAMETERS, objClassBuilder, true);
+            getSchemaFromBapiFunction(function, readOnlyParams, objClassBuilder, true);
         } catch (Exception e) {
             throw new ConnectorIOException("Error when parse user schema from SAP: " + e, e);
         }
@@ -883,7 +886,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         builder.setName(userName);
 
         getDataFromBapiFunction(function, READ_WRITE_PARAMETERS, builder);
-        getDataFromBapiFunction(function, READ_ONLY_PARAMETERS, builder);
+        getDataFromBapiFunction(function, readOnlyParams, builder);
 
         JCoStructure islocked = function.getExportParameterList().getStructure("ISLOCKED");
         Boolean enable = "U".equals(islocked.getString(LOCAL_LOCK)); // U - unlocked, L - locked
