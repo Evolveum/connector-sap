@@ -168,15 +168,6 @@ public class SapConfiguration extends AbstractConfiguration {
         if (client == null) {
             throw new ConfigurationException("client is empty");
         }
-        if(readOnlyParams.length > 0)
-        {
-        	for (String readOnlyParam : readOnlyParams) {
-				if (!Arrays.asList(SapConnector.READ_ONLY_PARAMETERS).contains(readOnlyParam)) {
-					throw new ConfigurationException("parameter" + readOnlyParam + "is invalid");
-					//TODO - validate over full list of valid params? 
-				}
-			}
-        }
 
         parseTableDefinitions();
 
