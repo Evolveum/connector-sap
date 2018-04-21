@@ -94,7 +94,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     static final String[] READ_ONLY_PARAMETERS = {"ISLOCKED", "LASTMODIFIED", "SNC", "ADMINDATA", "IDENTITY"};
     // variable version of READ_ONLY_PARAMETERS that could be set through connector configuration
     private String[] readOnlyParams;
-    // these attributes in "ADDRESS" parameter name we can't update, only set, because "ADDRESSX" in BAPI_USER_CHANGE don't contains these fiels
+    // these attributes in "ADDRESS" parameter name we can't update, only set, because "ADDRESSX" in BAPI_USER_CHANGE don't contains these fields
     private static final String[] CREATE_ONLY_ATTRIBUTES = {"ADDRESS" + SEPARATOR + "COUNTY_CODE", "ADDRESS" + SEPARATOR + "COUNTY",
             "ADDRESS" + SEPARATOR + "TOWNSHIP_CODE", "ADDRESS" + SEPARATOR + "TOWNSHIP", "DEFAULTS" + SEPARATOR + "CATTKENNZ"};
 
