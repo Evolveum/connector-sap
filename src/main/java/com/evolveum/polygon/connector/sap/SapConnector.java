@@ -1852,6 +1852,10 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 //(126) USER_LOCKED: USER_LOCKED Message 158 of class 00 type E
                 LOG.warn("User is locked, but password is correct: " + e, e);
                 return true;
+            } else if ((e.getGroup() == 126 && "012".equalsIgnoreCase(e.getMessageNumber())) || e.toString().contains("PASSWORD_EXPIRED")) {
+                //(126) PASSWORD_EXPIRED: PASSWORD_EXPIRED Message 012 of class 00 type E
+                LOG.warn("Password is expired: " + e, e);
+                return true;
             } else {
                 LOG.error(e, e.toString());
                 throw e;
