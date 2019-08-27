@@ -76,13 +76,19 @@ public class TestClient {
         properties.load(inputStream);
 
         sapConfiguration = new SapConfiguration();
+        if (properties.containsKey("balancedConnection")) {
+            sapConfiguration.setBalancedConnection(Boolean.parseBoolean(properties.getProperty("balancedConnection")));
+        }
         sapConfiguration.setHost(properties.getProperty("host"));
         if (properties.containsKey("port")) {
             sapConfiguration.setPort(properties.getProperty("port"));
         }
         sapConfiguration.setUser(properties.getProperty("user"));
         sapConfiguration.setPlainPassword(properties.getProperty("password"));
-        sapConfiguration.setSystemId("SRS");
+        if (properties.containsKey("logonGroup")) {
+            sapConfiguration.setLogonGroup(properties.getProperty("logonGroup"));
+        }
+        sapConfiguration.setSystemId(properties.getProperty("r3name"));
         if (properties.containsKey("systemNumber")) {
             sapConfiguration.setSystemNumber(properties.getProperty("systemNumber"));
         }
