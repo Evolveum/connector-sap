@@ -76,8 +76,8 @@ public class TestClient {
         properties.load(inputStream);
 
         sapConfiguration = new SapConfiguration();
-        if (properties.containsKey("balancedConnection")) {
-            sapConfiguration.setBalancedConnection(Boolean.parseBoolean(properties.getProperty("balancedConnection")));
+        if (properties.containsKey("loadBalancing")) {
+            sapConfiguration.setLoadBalancing(Boolean.parseBoolean(properties.getProperty("loadBalancing")));
         }
         sapConfiguration.setHost(properties.getProperty("host"));
         if (properties.containsKey("port")) {

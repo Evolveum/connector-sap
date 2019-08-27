@@ -33,7 +33,7 @@ public class SapConfiguration extends AbstractConfiguration {
 
     private static final Log LOG = Log.getLog(SapConfiguration.class);
 
-    private Boolean balancedConnection = false;
+    private Boolean loadBalancing = false;
 
     private String host;
 
@@ -266,7 +266,7 @@ public class SapConfiguration extends AbstractConfiguration {
     @Override
     public String toString() {
         return "SapConfiguration{" +
-                "balancedConnection='" + balancedConnection + '\'' +
+                "loadBalancing='" + loadBalancing + '\'' +
                 ", host='" + host + '\'' +
                 ", port='" + port + '\'' +
                 ", user='" + user + '\'' +
@@ -303,14 +303,14 @@ public class SapConfiguration extends AbstractConfiguration {
                 '}';
     }
 
-    @ConfigurationProperty(order = 1, displayMessageKey = "sap.config.balancedConnection",
-            helpMessageKey = "sap.config.balancedConnection.help")
-    public Boolean getBalancedConnection() {
-        return balancedConnection;
+    @ConfigurationProperty(order = 1, displayMessageKey = "sap.config.loadBalancing",
+            helpMessageKey = "sap.config.loadBalancing.help")
+    public Boolean getLoadBalancing() {
+        return loadBalancing;
     }
 
-    public void setBalancedConnection(Boolean balancedConnection) {
-        this.balancedConnection = balancedConnection;
+    public void setLoadBalancing(Boolean loadBalancing) {
+        this.loadBalancing = loadBalancing;
     }
 
     @ConfigurationProperty(order = 2, displayMessageKey = "sap.config.host",
@@ -663,7 +663,7 @@ public class SapConfiguration extends AbstractConfiguration {
         //adapt parameters in order to configure a valid destination
         Properties connectProperties = new Properties();
 
-        if (balancedConnection) {
+        if (loadBalancing) {
             connectProperties.setProperty(DestinationDataProvider.JCO_MSHOST, host);
             connectProperties.setProperty(DestinationDataProvider.JCO_GROUP, logonGroup);
         } else {
