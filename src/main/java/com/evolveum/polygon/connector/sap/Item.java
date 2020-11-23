@@ -30,7 +30,6 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerConfigurationException;
 import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
@@ -68,7 +67,6 @@ public class Item {
     private static final String ITEM_NAME = "item";
 
     private static final DocumentBuilder loader;
-    private static final Transformer transformer;
 
     static {
         try {
@@ -76,18 +74,13 @@ public class Item {
             factory.setNamespaceAware(true);
             loader = factory.newDocumentBuilder();
 
-            transformer = TransformerFactory.newInstance().newTransformer();
-//                transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-
         } catch (ParserConfigurationException ex) {
             throw new IllegalStateException("Error creating XML document " + ex.getMessage());
-        } catch (TransformerConfigurationException tce) {
-            throw new IllegalStateException("Error creating transformer " + tce.getMessage());
         }
     }
 
 
-    public Item(String data, boolean isXml, String keyAttributeName) throws ParserConfigurationException, IOException, SAXException {
+    public Item(String data, boolean isXml, String keyAttributeName) throws IOException, SAXException {
         this.data = data;
         this.isXml = isXml;
 
@@ -115,7 +108,7 @@ public class Item {
         }
     }
 
-    public Item(JCoTable agt) throws ParserConfigurationException, TransformerException {
+    public Item(JCoTable agt) throws TransformerException {
         Document doc = loader.newDocument();
         Element mainRootElement = doc.createElementNS("", ITEM_NAME);
         doc.appendChild(mainRootElement);
@@ -126,9 +119,10 @@ public class Item {
             Element node = doc.createElement(field.getName());
             node.appendChild(doc.createTextNode(field.getString()));
             mainRootElement.appendChild(node);
-
             values.put(field.getName(), field.getString());
         }
+        Transformer transformer = TransformerFactory.newInstance().newTransformer(); // Transformer is not thread-safe, so it must be called here, not in the static
+        // transformer.setOutputProperty(OutputKeys.INDENT, "yes");
 
         DOMSource source = new DOMSource(doc);
         StreamResult result = new StreamResult(new StringWriter());
