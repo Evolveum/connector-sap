@@ -26,7 +26,6 @@ import org.identityconnectors.framework.common.exceptions.*;
 import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
-import org.identityconnectors.framework.spi.Connector;
 import org.identityconnectors.framework.spi.ConnectorClass;
 import org.identityconnectors.framework.spi.PoolableConnector;
 import org.identityconnectors.framework.spi.operations.*;
@@ -36,8 +35,6 @@ import javax.xml.transform.TransformerException;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -464,7 +461,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                     objClassBuilder.addAttributeInfo(createAttributeInfo(param, attrName, classs, readOnly));
                 } else if ("java.util.Date".equals(className)) {
                     objClassBuilder.addAttributeInfo(createAttributeInfo(param, attrName, Long.class, readOnly));
-                    LOG.ok(className + " symulated as java.lang.Long over connector for: " + attrName);
+                    LOG.ok(className + " simulated as java.lang.Long over connector for: " + attrName);
                 } else if ("byte[]".equals(className)) {
                     objClassBuilder.addAttributeInfo(createAttributeInfo(param, attrName, byte[].class, readOnly));
                 } else {
@@ -506,6 +503,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     @Override
     public void executeQuery(ObjectClass objectClass, SapFilter query, ResultsHandler handler, OperationOptions options) {
         LOG.info("executeQuery: {0}, options: {1}, objectClass: {2}", query, options, objectClass);
+
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
 
             executeAccountQuery(query, handler, options);

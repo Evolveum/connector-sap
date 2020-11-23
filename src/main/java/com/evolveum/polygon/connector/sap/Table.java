@@ -22,7 +22,6 @@ import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueE
 import org.identityconnectors.framework.common.objects.Attribute;
 import org.xml.sax.SAXException;
 
-import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.TransformerException;
 import java.io.IOException;
 import java.util.LinkedList;
@@ -66,7 +65,7 @@ public class Table {
      */
     private boolean update = false;
 
-    public Table(JCoTable agt) throws TransformerException, ParserConfigurationException {
+    public Table(JCoTable agt) throws TransformerException {
         agt.firstRow();
         if (agt.getNumRows() > 0) {
             do {
@@ -77,7 +76,7 @@ public class Table {
         }
     }
 
-    public Table(Set<Attribute> attributes, String attrName) throws IOException, SAXException, ParserConfigurationException {
+    public Table(Set<Attribute> attributes, String attrName) throws IOException, SAXException {
         List<Object> items = null;
         for (Attribute attr : attributes) {
             if (attr.getName().startsWith(attrName)) {
