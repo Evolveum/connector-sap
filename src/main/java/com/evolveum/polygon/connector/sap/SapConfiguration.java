@@ -120,6 +120,11 @@ public class SapConfiguration extends AbstractConfiguration {
     private Boolean useNativeNames = false;
 
     /**
+     * if this is true every activitygroup which is assigned to a accounts will be hidden from the result object
+     */
+    private Boolean hideIndirectActivitygroups = false;
+
+    /**
      * definition of any tables in SAP to read his data, for example:
      * * AGR_DEFINE as ACTIVITYGROUP - AGR_DEFINE is table name in SAP, ACTIVITYGROUP is his alias in connector
      * * MANDT:3:IGNORE - MANDT is his first column with length 3 and in connector is ignored
@@ -300,6 +305,7 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", tableKeys=" + tableKeys +
                 ", tableIgnores=" + tableIgnores +
                 ", tableAliases=" + tableAliases +
+                ", hideIndirectActivitygroups=" + hideIndirectActivitygroups +
                 '}';
     }
 
@@ -639,10 +645,19 @@ public class SapConfiguration extends AbstractConfiguration {
     public String[] getReadOnlyParams() {
         return readOnlyParams;
     }
-    
     public void setReadOnlyParams(String[] readOnlyParams) {
     	this.readOnlyParams = readOnlyParams;
     }
+
+    @ConfigurationProperty(order = 34, displayMessageKey = "sap.config.hideIndirectActivitygroups",
+            helpMessageKey = "sap.config.hideIndirectActivitygroups.help")
+    public Boolean getHideIndirectActivitygroups() {
+        return hideIndirectActivitygroups;
+    }
+    public void setHideIndirectActivitygroups(Boolean hideIndirectActivitygroups) {
+        this.hideIndirectActivitygroups = hideIndirectActivitygroups;
+    }
+
 
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();

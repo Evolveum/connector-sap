@@ -902,8 +902,10 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         // tables and his id's
         for (String tableName : configuration.getTableParameterNames()) {
             Table table = new Table(function.getTableParameterList().getTable(tableName));
+            if(configuration.getHideIndirectActivitygroups() && ACTIVITYGROUPS.equals(tableName)){
+                table.getValues().removeIf(entry -> StringUtil.isNotBlank(entry.getByAttribute("ORG_FLAG")));
+            }
             builder.addAttribute(AttributeBuilder.build(tableName, table.getXmls()));
-
             if (TABLETYPE_PARAMETER_KEYS.containsKey(tableName)) {
                 String attribute = TABLETYPE_PARAMETER_KEYS.get(tableName);
                 builder.addAttribute(AttributeBuilder.build(tableName + SEPARATOR + TABLETYPE_PARAMETER_KEYS.get(tableName), table.getIds(attribute)));
