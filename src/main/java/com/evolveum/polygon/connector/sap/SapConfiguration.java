@@ -156,6 +156,16 @@ public class SapConfiguration extends AbstractConfiguration {
      */
     private Map<String, String> tableAliases = new LinkedHashMap<String, String>();
 
+    /**
+     * which SAP error codes are considered as non-fatal, for example 025 (Company address cannot be selected), 410 (Maintenance of user user1 locked by user midpoint)
+     */
+    private String[] nonFatalErrorCodes = {};
+
+    /**
+     * Specify how strictly should connector react to password change errors (e.g. user password is too short for SAP).
+     */
+    private Boolean pwdChangeErrorIsFatal = true;
+
     @Override
     public void validate() {
         if (isBlank(host)) {
@@ -300,6 +310,8 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", tableKeys=" + tableKeys +
                 ", tableIgnores=" + tableIgnores +
                 ", tableAliases=" + tableAliases +
+                ", nonFatalErrorCodes='" + Arrays.toString(nonFatalErrorCodes) +
+                ", pwdChangeErrorIsFatal=" + pwdChangeErrorIsFatal +
                 '}';
     }
 
@@ -644,6 +656,26 @@ public class SapConfiguration extends AbstractConfiguration {
     	this.readOnlyParams = readOnlyParams;
     }
 
+    @ConfigurationProperty(order = 34, displayMessageKey = "sap.config.nonFatalErrorCodes",
+            helpMessageKey = "sap.config.nonFatalErrorCodes.help")
+    public String[] getNonFatalErrorCodes() {
+        return nonFatalErrorCodes;
+    }
+
+    public void setNonFatalErrorCodes(String[] nonFatalErrorCodes) {
+        this.nonFatalErrorCodes = nonFatalErrorCodes;
+    }
+
+    @ConfigurationProperty(order = 35, displayMessageKey = "sap.config.pwdChangeErrorIsFatal",
+            helpMessageKey = "sap.config.pwdChangeErrorIsFatal.help")
+    public Boolean getPwdChangeErrorIsFatal() {
+        return pwdChangeErrorIsFatal;
+    }
+
+    public void setPwdChangeErrorIsFatal(Boolean pwdChangeErrorIsFatal) {
+        this.pwdChangeErrorIsFatal = pwdChangeErrorIsFatal;
+    }
+
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
         if (password != null) {
@@ -730,4 +762,5 @@ public class SapConfiguration extends AbstractConfiguration {
     public Map<String, String> getTableAliases() {
         return tableAliases;
     }
+
 }

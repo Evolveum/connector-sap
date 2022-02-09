@@ -938,6 +938,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         boolean error = false;
         boolean warning = false;
         List<String> ret = new LinkedList<String>();
+        List<String> softErrCodes = Arrays.asList(this.configuration.getNonFatalErrorCodes());
 
         returnList.firstRow();
         if (returnList.getNumRows() > 0) {
@@ -955,11 +956,17 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                         throw new UnknownUidException(message + ", RETURN: " + returnList.toXML());
                     }
                     if ("187".equals(number)) { // Password is not long enough (minimum length: 8 characters)
-                        throw new InvalidPasswordException(message + ", RETURN: " + returnList.toXML());
+                        throw handlePasswordException (new InvalidPasswordException(message + ", RETURN: " + returnList.toXML()));
                     }
                     if ("290".equals(number)) { // Please enter an initial password
-                        throw new InvalidPasswordException(message + ", RETURN: " + returnList.toXML());
+                        throw handlePasswordException (new InvalidPasswordException(message + ", RETURN: " + returnList.toXML()));
                     }
+
+                    // check if return code is considered as soft schema error by the connector configuration:
+                    if (softErrCodes.stream().anyMatch(err -> err.equals(number))) {
+                        throw new InvalidAttributeValueException(message + ", RETURN: " + returnList.toXML());
+                    }
+
                 } else if ("W".equals(type)) {
                     warning = true;
                 }
@@ -1107,7 +1114,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
             // check password max length
             if (configuration.getFailWhenTruncating() && pwd.toString().length() > sapAttributesLength.get(BAPIPWD)) {
-                throw new InvalidPasswordException("Attribute " + passwordAttribute + " with value XXXX (secured) is longer then maximum length in SAP " + sapAttributesLength.get(passwordAttribute + ", failWhenTruncating=enabled"));
+                throw handlePasswordException(new InvalidPasswordException("Attribute " + passwordAttribute + " with value XXXX (secured) is longer then maximum length in SAP " + sapAttributesLength.get(passwordAttribute + ", failWhenTruncating=enabled")));
             }
 
             // validate password in SAP
@@ -1152,7 +1159,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 } catch (JCoException e) {
                     LOG.error("can't change password: " + e, e);
                     if (e.getGroup() == 126 && "193".equalsIgnoreCase(e.getMessageNumber())) {
-                        throw new PasswordExpiredException("Choose a password that is different from your last & passwords for user " + userName + ": " + e, e);
+                        throw handlePasswordException(new PasswordExpiredException("Choose a password that is different from your last & passwords for user " + userName + ": " + e, e));
                     } else if (e.getGroup() == 126 && "190".equalsIgnoreCase(e.getMessageNumber())) {
                         LOG.warn("User " + userName + " is locked after too many failed logins, try to unlocking");
                         // try unlock user
@@ -1876,7 +1883,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         } catch (JCoException e) {
             if (e.getGroup() != 104) {
                 if (e.getGroup() != 123) {
-                    throw new InvalidPasswordException("Password is too simple");
+                    throw handlePasswordException(new InvalidPasswordException("Password is too simple"));
                 }
 
                 LOG.ok("PASSWORD_FORMAL_CHECK is NOT installed");
@@ -1884,6 +1891,13 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
             LOG.ok("PASSWORD_FORMAL_CHECK is NOT remote enabled");
         }
+    }
+
+    private ConnectorException handlePasswordException(InvalidCredentialException e) {
+        if (this.configuration.getPwdChangeErrorIsFatal())
+            return e;
+        else
+            return new InvalidAttributeValueException(e); // wrap exception into soft schema exception
     }
 
 }
