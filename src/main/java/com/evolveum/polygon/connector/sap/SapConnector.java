@@ -1115,7 +1115,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         }
     }
 
-    private Uid createUser(Set<Attribute> attributes) throws JCoException, ClassNotFoundException {
+    private Uid createUser(Set<Attribute> attributes) throws JCoException, ClassNotFoundException,
+            TransformerException {
         LOG.info("createUser attributes: {0}", attributes);
 
         JCoFunction function = destination.getRepository().getFunction("BAPI_USER_CREATE1");
@@ -1564,7 +1565,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         }
     }
 
-    private Uid updateUser(Uid uid, Set<Attribute> attributes) throws JCoException, ClassNotFoundException {
+    private Uid updateUser(Uid uid, Set<Attribute> attributes)
+            throws JCoException, ClassNotFoundException, TransformerException {
         LOG.info("updateUser {0} attributes: {1}", uid, attributes);
 
         JCoFunction function = destination.getRepository().getFunction("BAPI_USER_CHANGE");
@@ -1661,13 +1663,32 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         executeFunction(functionLock);
     }
 
-    private void assignActivityGroups(Set<Attribute> attributes, String userName) throws JCoException {
+    private void assignActivityGroups(Set<Attribute> attributes, String userName)
+            throws JCoException, TransformerException {
+
         Table activityGroups = null;
         try {
             activityGroups = new Table(attributes, ACTIVITYGROUPS);
         } catch (Exception e) {
             throw new InvalidAttributeValueException("Not parsable ACTIVITYGROUPS in attributes " + attributes + ", " + e, e);
         }
+
+        if (!activityGroups.isUpdate()) {
+            return;
+        }
+
+        //load current activitygroups from sap to avoid resetting roles if merge config is enabled
+        Optional<Table> tableOldActivitygroups = Optional.empty();
+        if(configuration.getMergeAgrNameWithExistingAcitivitygroupsValue() == Boolean.TRUE){
+            JCoFunction functionDetail = destination.getRepository().getFunction("BAPI_USER_GET_DETAIL");
+            if (functionDetail == null)
+                throw new RuntimeException("BAPI_USER_GET_DETAIL not found in SAP.");
+
+            functionDetail.getImportParameterList().setValue(USERNAME, userName);
+            executeFunction(functionDetail);
+            tableOldActivitygroups = Optional.of(new Table(functionDetail.getTableParameterList().getTable(ACTIVITYGROUPS)));
+        }
+
         JCoFunction functionAssign = destination.getRepository().getFunction("BAPI_USER_ACTGROUPS_ASSIGN");
         if (functionAssign == null)
             throw new RuntimeException("BAPI_USER_ACTGROUPS_ASSIGN not found in SAP.");
@@ -1675,33 +1696,47 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         functionAssign.getImportParameterList().setValue(USERNAME, userName);
         JCoTable activityGroupsTable = functionAssign.getTableParameterList().getTable(ACTIVITYGROUPS);
 
-        if (activityGroups != null && activityGroups.size() > 0) {
-            for (Item ag : activityGroups.getValues()) {
+        if (activityGroups.size() > 0) {
+            for (Item newItem : activityGroups.getValues()) {
+                Optional<Item> matchingOldValue = tableOldActivitygroups.map(Table::getValues)
+                                                                        .orElse(Collections.emptyList())
+                                                                        .stream()
+                                                                        .filter(item -> Objects.equals(
+                                                                                newItem.getByAttribute(AGR_NAME),
+                                                                                item.getByAttribute(AGR_NAME)))
+                                                                        .findFirst();
                 activityGroupsTable.appendRow();
-                activityGroupsTable.setValue(AGR_NAME, ag.getByAttribute(AGR_NAME));
-                String fromDat = ag.getByAttribute("FROM_DAT");
+                activityGroupsTable.setValue(AGR_NAME, newItem.getByAttribute(AGR_NAME));
+                String fromDat = applyDeltaToItemAttribute(newItem, matchingOldValue, "FROM_DAT");
                 if (fromDat != null) {
                     activityGroupsTable.setValue("FROM_DAT", fromDat);
                 }
-                String toDat = ag.getByAttribute("TO_DAT");
+                String toDat = applyDeltaToItemAttribute(newItem, matchingOldValue,"TO_DAT");
                 if (toDat != null) {
                     activityGroupsTable.setValue("TO_DAT", toDat);
                 }
-                String argText = ag.getByAttribute("AGR_TEXT");
+                String argText = applyDeltaToItemAttribute(newItem, matchingOldValue,"AGR_TEXT");
                 if (argText != null) {
                     activityGroupsTable.setValue("AGR_TEXT", argText);
                 }
-                String orgFlag = ag.getByAttribute("ORG_FLAG");
+                String orgFlag = applyDeltaToItemAttribute(newItem, matchingOldValue,"ORG_FLAG");
                 if (orgFlag != null) {
                     activityGroupsTable.setValue("ORG_FLAG", orgFlag);
                 }
             }
         }
 
-        if (activityGroups.isUpdate()) {
-            executeFunction(functionAssign);
-        }
+        executeFunction(functionAssign);
         LOG.info("ACTGROUPS_ASSIGN modify {0}, TPL: {1}", activityGroups.isUpdate(), functionAssign.getTableParameterList().toXML());
+    }
+    private String applyDeltaToItemAttribute(Item newItem,Optional<Item> oldItem, String attributeName){
+        //if the item is an xml string it can provide all the values
+        //if not we need to rely on the old value to avoid an overwrite of the old values.
+        if(newItem.isXml()){
+            return newItem.getByAttribute(attributeName);
+        } else {
+            return oldItem.map(item -> item.getByAttribute(attributeName)).orElse(null);
+        }
     }
 
     private void assignProfiles(Set<Attribute> attributes, String userName) throws JCoException {

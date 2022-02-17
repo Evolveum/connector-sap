@@ -127,6 +127,24 @@ public class SapConfiguration extends AbstractConfiguration {
     private Boolean hideIndirectActivitygroups = false;
 
     /**
+     * Default config:
+     * Because the AGR_NAME field only stores AGR_NAMEs it has no information on the current from/to dates in the actual
+     * activitygroups XML field and changes to AGR_NAMES will simply overwrite everything in the SAP with empty from/to
+     * values.
+     * SAP generates the current date as a from date, so if you have a role change (AGR_NAME) on another date, every
+     * role in the SAP will be deleted and added again. All the information about the actual date of assignment will be lost.
+     * This can generate a lot of audit entries in the SAP.
+     *<br/>
+     * Enable this configuration to merge changes to AGR_NAME with the actual values inside ACTIVITYGROUPS in the SAP.
+     * The current state of the user will be loaded from SAP and the existing data will be used if nothing has been
+     * provided by midpoint. To propagate actual changes in the ACTIVITYGROUPS from/to fields the change algorithm will
+     * check if the attributes from the midpoint are xml attributes. If yes it will simply use those values because they
+     * have the best accuracy. If not it will use the current data from the SAP for those values.
+     *
+     */
+    private Boolean mergeAgrNameWithExistingAcitivitygroupsValue = false;
+
+    /**
      * definition of any tables in SAP to read his data, for example:
      * * AGR_DEFINE as ACTIVITYGROUP - AGR_DEFINE is table name in SAP, ACTIVITYGROUP is his alias in connector
      * * MANDT:3:IGNORE - MANDT is his first column with length 3 and in connector is ignored
@@ -719,6 +737,14 @@ public class SapConfiguration extends AbstractConfiguration {
         this.pwdChangeErrorIsFatal = pwdChangeErrorIsFatal;
     }
 
+    @ConfigurationProperty(order = 36, displayMessageKey = "sap.config.mergeAgrNameWithExistingAcitivitygroupsValue",
+                           helpMessageKey = "sap.config.mergeAgrNameWithExistingAcitivitygroupsValue.help")
+    public Boolean getMergeAgrNameWithExistingAcitivitygroupsValue() {
+        return mergeAgrNameWithExistingAcitivitygroupsValue;
+    }
+    public void setMergeAgrNameWithExistingAcitivitygroupsValue(Boolean mergeAgrNameWithExistingAcitivitygroupsValue) {
+        this.mergeAgrNameWithExistingAcitivitygroupsValue = mergeAgrNameWithExistingAcitivitygroupsValue;
+    }
 
     @ConfigurationProperty(order = 37, displayMessageKey = "sap.config.baseAccountQuery",
             helpMessageKey = "sap.config.baseAccountQuery.help")
