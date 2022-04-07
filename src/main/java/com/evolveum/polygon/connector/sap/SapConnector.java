@@ -649,6 +649,9 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 } while (entries.nextRow());
             }
         } catch (JCoException e) {
+            //there is no other way of checking this
+            if("TABLE_EMPTY".equals(e.getKey()))
+                return;
             throw new ConnectorIOException(e.getMessage(), e);
         }
     }
