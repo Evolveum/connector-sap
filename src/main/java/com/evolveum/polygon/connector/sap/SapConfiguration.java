@@ -31,7 +31,9 @@ import static org.identityconnectors.common.StringUtil.isNotEmpty;
 
 public class SapConfiguration extends AbstractConfiguration {
 
-    private static final Log LOG = Log.getLog(SapConfiguration.class);
+    private static final String BASE_ACCOUNT_QUERY_SEPARATOR = ",";
+
+	private static final Log LOG = Log.getLog(SapConfiguration.class);
 
     private Boolean loadBalancing = false;
 
@@ -171,6 +173,13 @@ public class SapConfiguration extends AbstractConfiguration {
      */
     private Boolean pwdChangeErrorIsFatal = true;
 
+    /**
+     * Simple filter added to all account queries to limit the accounts read by BAPI_USER_GETLIST.
+     * Format is "option,parameter,value", commas are currently not escaped. 
+     * E.g. "CP,USERNAME,1CD*" to limit the query to all accounts with username prefix 1CD. 
+     */
+	private String baseAccountQuery = null;
+
     @Override
     public void validate() {
         if (isBlank(host)) {
@@ -191,9 +200,25 @@ public class SapConfiguration extends AbstractConfiguration {
         parseTableDefinitions();
 
         checkParameterNames();
+        
+        parseBaseAccountQuery();
     }
 
-    private void checkParameterNames() {
+    public SapFilter parseBaseAccountQuery() {
+		
+		if(baseAccountQuery == null) {
+			return null;
+		} else {
+			String[] fields = baseAccountQuery.split(BASE_ACCOUNT_QUERY_SEPARATOR);
+			if(fields.length != 3) {
+				throw new ConfigurationException("Parameter baseAccountQuery is not empty but is not in the form 'option,parameter,value' - " + baseAccountQuery);
+			}
+			
+			return new SapFilter(fields[0], fields[1], fields[2]);
+		}
+	}
+
+	private void checkParameterNames() {
         // if empty, update length
         if (tableParameterNames != null && tableParameterNames.length == 1 && "".equals(tableParameterNames[0])) {
             tableParameterNames = new String[0];
@@ -689,6 +714,19 @@ public class SapConfiguration extends AbstractConfiguration {
         this.pwdChangeErrorIsFatal = pwdChangeErrorIsFatal;
     }
 
+
+    @ConfigurationProperty(order = 36, displayMessageKey = "sap.config.baseAccountQuery",
+            helpMessageKey = "sap.config.baseAccountQuery.help")
+    public String getBaseAccountQuery() {
+        return baseAccountQuery;
+    }
+
+    public void setBaseAccountQuery(String baseAccountQuery) {
+        this.baseAccountQuery = baseAccountQuery;
+    }
+
+    
+    
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
         if (password != null) {
@@ -775,5 +813,4 @@ public class SapConfiguration extends AbstractConfiguration {
     public Map<String, String> getTableAliases() {
         return tableAliases;
     }
-
 }

@@ -144,6 +144,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     private Map<String, Integer> sapAttributesLength = new HashMap<String, Integer>();
     private Map<String, String> sapAttributesType = new HashMap<String, String>();
 
+	private SapFilter baseAccountQuery;
+
     @Override
     public Configuration getConfiguration() {
         return configuration;
@@ -179,6 +181,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         }
         // set read only parameters from gui connector configuration
         readOnlyParams =  this.configuration.getReadOnlyParams();
+        
+        baseAccountQuery = this.configuration.parseBaseAccountQuery();
 
         if (this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
             createDestinationDataFile(destinationName, props);
@@ -715,7 +719,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                             null != options.getPagedResultsOffset() ? Math.max(0, options
                                     .getPagedResultsOffset()) : 0;
                     function.getImportParameterList().setValue("MAX_ROWS", pagedResultsOffset + pageSize);
-                    prepareFilters(function, query);
+                    
+                    prepareFilters(function, addBaseToAccountQuery(baseAccountQuery, query));
                     LOG.ok("SELECTION_EXP: " + function.getTableParameterList().getTable("SELECTION_EXP").toXML());
                     executeFunction(function);
                     JCoTable userList = function.getTableParameterList().getTable("USERLIST");
@@ -757,7 +762,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
                 } else {
                     // not paged search
-                    prepareFilters(function, query);
+                    prepareFilters(function, addBaseToAccountQuery(baseAccountQuery, query));
                     LOG.ok("SELECTION_EXP: " + function.getTableParameterList().getTable("SELECTION_EXP").toXML());
                     executeFunction(function);
                     JCoTable userList = function.getTableParameterList().getTable("USERLIST");
@@ -795,8 +800,47 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             throw new ConnectorIOException(e.getMessage(), e);
         }
     }
+    
+    private SapFilter addBaseToAccountQuery(SapFilter baseQuery, SapFilter accountQuery) {
+    	if (accountQuery == null) {
+    		return baseQuery;
+    	} else if(baseQuery == null) {
+    		return accountQuery;
+    	} else {
+    		if(SapFilter.LOGICAL_AND.equals(accountQuery.getLogicalOperation())) {
+    			// add the baseQuery as one more expression to filter
+    			// if added as a new binary AND operation only, SAP complains 
+    			// '01615 - Logical operation and arity are only supported in the first line'
+    			List<SapFilter> andExpressions = new ArrayList<>();
+    			andExpressions.add(baseQuery);
+    			andExpressions.addAll(accountQuery.getExpressions());
+    			
+    			// do not mess with the original value
+    			SapFilter result = new SapFilter();
+    			result.setField(accountQuery.getField());
+    			result.setParameter(accountQuery.getParameter());
+    			result.setLogicalOperation(accountQuery.getLogicalOperation());
+    			result.setOption(accountQuery.getOption());
+
+    			result.setExpressions(andExpressions);
+    			
+    			return result;
+    		} else {
+    			// this may only work for account query which is not a logical OR already
+    			// but my client does not support OR queries to test
+    			// may lead to '01615 - Logical operation and arity are only supported in the first line' error
+        		SapFilter result = new SapFilter();
+        		result.setLogicalOperation(SapFilter.LOGICAL_AND);
+        		result.setArity(2);
+        		result.setExpressions(Arrays.asList(baseQuery, accountQuery));
+        		
+        		return result;
+    		}
+    	}
+    }
 
     private void prepareFilters(JCoFunction function, SapFilter query) {
+
         if (query == null) {
             return; // empty filter
         }
