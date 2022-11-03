@@ -180,6 +180,11 @@ public class SapConfiguration extends AbstractConfiguration {
      */
 	private String baseAccountQuery = null;
 
+	/** 
+	 * Include GLOB_LOCK in account status evaluation.
+	 */
+	private boolean considerGlobalLock = false;
+
     @Override
     public void validate() {
         if (isBlank(host)) {
@@ -715,7 +720,7 @@ public class SapConfiguration extends AbstractConfiguration {
     }
 
 
-    @ConfigurationProperty(order = 36, displayMessageKey = "sap.config.baseAccountQuery",
+    @ConfigurationProperty(order = 37, displayMessageKey = "sap.config.baseAccountQuery",
             helpMessageKey = "sap.config.baseAccountQuery.help")
     public String getBaseAccountQuery() {
         return baseAccountQuery;
@@ -723,10 +728,18 @@ public class SapConfiguration extends AbstractConfiguration {
 
     public void setBaseAccountQuery(String baseAccountQuery) {
         this.baseAccountQuery = baseAccountQuery;
-    }
+	}
 
-    
-    
+	@ConfigurationProperty(order = 38, displayMessageKey = "sap.config.considerGlobalLock", 
+			helpMessageKey = "sap.config.considerGlobalLock.help")
+	public boolean getConsiderGlobalLock() {
+		return this.considerGlobalLock;
+	}
+
+	public void setConsiderGlobalLock(boolean considerGlobalLock) {
+		this.considerGlobalLock = considerGlobalLock;
+	}
+
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
         if (password != null) {
@@ -813,4 +826,5 @@ public class SapConfiguration extends AbstractConfiguration {
     public Map<String, String> getTableAliases() {
         return tableAliases;
     }
+
 }

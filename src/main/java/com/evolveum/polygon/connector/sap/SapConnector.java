@@ -124,6 +124,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
     //ISLOCKED
     private static final String LOCAL_LOCK = "LOCAL_LOCK";     // Local_Lock - Logon generally locked for the local system
+    private static final String GLOBAL_LOCK = "GLOB_LOCK";     // GLOB_LOCK - Higher level lock probably
     private static final String WRNG_LOGON = "WRNG_LOGON";     // WRNG_LOGON - Password logon locked by incorrect logon attempts
 
     public static final String USERNAME = "USERNAME";
@@ -922,7 +923,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             }
         }
     }
-
+    
     private ConnectorObject convertUserToConnectorObject(JCoFunction function, JCoFunction userLoginInfoFunc) throws JCoException, TransformerException, ParserConfigurationException {
         String userName = function.getImportParameterList().getString(USERNAME);
 
@@ -934,8 +935,10 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         getDataFromBapiFunction(function, readOnlyParams, builder);
 
         JCoStructure islocked = function.getExportParameterList().getStructure("ISLOCKED");
-        Boolean enable = "U".equals(islocked.getString(LOCAL_LOCK)); // U - unlocked, L - locked
-        addAttr(builder, OperationalAttributes.ENABLE_NAME, enable);
+        boolean considerGlobalLock = configuration.getConsiderGlobalLock();
+        Boolean enabled = isAccountEnabled(islocked, considerGlobalLock); 
+        
+        addAttr(builder, OperationalAttributes.ENABLE_NAME, enabled);
         // we don't have BAPI method to unlock only this
         Boolean lock_out = "L".equals(islocked.getString("WRNG_LOGON")); // U - unlocked, L - locked
         addAttr(builder, OperationalAttributes.LOCK_OUT_NAME, lock_out);
@@ -975,6 +978,12 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
         return connectorObject;
     }
+
+	private boolean isAccountEnabled(JCoStructure islocked, boolean considerGlobalLock) {
+		// U - unlocked, L - locked
+		return "U".equals(islocked.getString(LOCAL_LOCK)) && 
+        		( ! considerGlobalLock || "U".equals(islocked.getString(GLOBAL_LOCK)));
+	}
 
     public List<String> parseReturnMessages(JCoFunction function) {
 
@@ -1625,8 +1634,9 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 function.getImportParameterList().setValue(USERNAME, userName);
                 executeFunction(function);
 
+                boolean considerGlobalLock = configuration.getConsiderGlobalLock();
                 JCoStructure islocked = function.getExportParameterList().getStructure("ISLOCKED");
-                Boolean enabledBefore = "U".equals(islocked.getString(LOCAL_LOCK)); // U - unlocked, L - locked
+                Boolean enabledBefore = isAccountEnabled(islocked, considerGlobalLock);
 
                 LOG.ok("lockoutStatus is set to: " + lockOut + ", enable: " + enable + ", readed administrative status from SAP: " + enabledBefore + ", unlocking acount and setting the same result");
                 enableOrDisableUser(true, userName);
