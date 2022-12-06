@@ -124,6 +124,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
     //ISLOCKED
     private static final String LOCAL_LOCK = "LOCAL_LOCK";     // Local_Lock - Logon generally locked for the local system
+    private static final String GLOBAL_LOCK = "GLOB_LOCK";     // GLOB_LOCK - Higher level lock probably
     private static final String WRNG_LOGON = "WRNG_LOGON";     // WRNG_LOGON - Password logon locked by incorrect logon attempts
 
     public static final String USERNAME = "USERNAME";
@@ -143,6 +144,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     private JCoDestination destination;
     private Map<String, Integer> sapAttributesLength = new HashMap<String, Integer>();
     private Map<String, String> sapAttributesType = new HashMap<String, String>();
+
+	private SapFilter baseAccountQuery;
 
     @Override
     public Configuration getConfiguration() {
@@ -179,6 +182,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         }
         // set read only parameters from gui connector configuration
         readOnlyParams =  this.configuration.getReadOnlyParams();
+        
+        baseAccountQuery = this.configuration.parseBaseAccountQuery();
 
         if (this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
             createDestinationDataFile(destinationName, props);
@@ -715,7 +720,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                             null != options.getPagedResultsOffset() ? Math.max(0, options
                                     .getPagedResultsOffset()) : 0;
                     function.getImportParameterList().setValue("MAX_ROWS", pagedResultsOffset + pageSize);
-                    prepareFilters(function, query);
+                    
+                    prepareFilters(function, addBaseToAccountQuery(baseAccountQuery, query));
                     LOG.ok("SELECTION_EXP: " + function.getTableParameterList().getTable("SELECTION_EXP").toXML());
                     executeFunction(function);
                     JCoTable userList = function.getTableParameterList().getTable("USERLIST");
@@ -757,7 +763,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
                 } else {
                     // not paged search
-                    prepareFilters(function, query);
+                    prepareFilters(function, addBaseToAccountQuery(baseAccountQuery, query));
                     LOG.ok("SELECTION_EXP: " + function.getTableParameterList().getTable("SELECTION_EXP").toXML());
                     executeFunction(function);
                     JCoTable userList = function.getTableParameterList().getTable("USERLIST");
@@ -795,8 +801,47 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             throw new ConnectorIOException(e.getMessage(), e);
         }
     }
+    
+    private SapFilter addBaseToAccountQuery(SapFilter baseQuery, SapFilter accountQuery) {
+    	if (accountQuery == null) {
+    		return baseQuery;
+    	} else if(baseQuery == null) {
+    		return accountQuery;
+    	} else {
+    		if(SapFilter.LOGICAL_AND.equals(accountQuery.getLogicalOperation())) {
+    			// add the baseQuery as one more expression to filter
+    			// if added as a new binary AND operation only, SAP complains 
+    			// '01615 - Logical operation and arity are only supported in the first line'
+    			List<SapFilter> andExpressions = new ArrayList<>();
+    			andExpressions.add(baseQuery);
+    			andExpressions.addAll(accountQuery.getExpressions());
+    			
+    			// do not mess with the original value
+    			SapFilter result = new SapFilter();
+    			result.setField(accountQuery.getField());
+    			result.setParameter(accountQuery.getParameter());
+    			result.setLogicalOperation(accountQuery.getLogicalOperation());
+    			result.setOption(accountQuery.getOption());
+
+    			result.setExpressions(andExpressions);
+    			
+    			return result;
+    		} else {
+    			// this may only work for account query which is not a logical OR already
+    			// but my client does not support OR queries to test
+    			// may lead to '01615 - Logical operation and arity are only supported in the first line' error
+        		SapFilter result = new SapFilter();
+        		result.setLogicalOperation(SapFilter.LOGICAL_AND);
+        		result.setArity(2);
+        		result.setExpressions(Arrays.asList(baseQuery, accountQuery));
+        		
+        		return result;
+    		}
+    	}
+    }
 
     private void prepareFilters(JCoFunction function, SapFilter query) {
+
         if (query == null) {
             return; // empty filter
         }
@@ -878,7 +923,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             }
         }
     }
-
+    
     private ConnectorObject convertUserToConnectorObject(JCoFunction function, JCoFunction userLoginInfoFunc) throws JCoException, TransformerException, ParserConfigurationException {
         String userName = function.getImportParameterList().getString(USERNAME);
 
@@ -890,8 +935,10 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         getDataFromBapiFunction(function, readOnlyParams, builder);
 
         JCoStructure islocked = function.getExportParameterList().getStructure("ISLOCKED");
-        Boolean enable = "U".equals(islocked.getString(LOCAL_LOCK)); // U - unlocked, L - locked
-        addAttr(builder, OperationalAttributes.ENABLE_NAME, enable);
+        boolean considerGlobalLock = configuration.getConsiderGlobalLock();
+        Boolean enabled = isAccountEnabled(islocked, considerGlobalLock); 
+        
+        addAttr(builder, OperationalAttributes.ENABLE_NAME, enabled);
         // we don't have BAPI method to unlock only this
         Boolean lock_out = "L".equals(islocked.getString("WRNG_LOGON")); // U - unlocked, L - locked
         addAttr(builder, OperationalAttributes.LOCK_OUT_NAME, lock_out);
@@ -931,6 +978,12 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
         return connectorObject;
     }
+
+	private boolean isAccountEnabled(JCoStructure islocked, boolean considerGlobalLock) {
+		// U - unlocked, L - locked
+		return "U".equals(islocked.getString(LOCAL_LOCK)) && 
+        		( ! considerGlobalLock || "U".equals(islocked.getString(GLOBAL_LOCK)));
+	}
 
     public List<String> parseReturnMessages(JCoFunction function) {
 
@@ -1581,8 +1634,9 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 function.getImportParameterList().setValue(USERNAME, userName);
                 executeFunction(function);
 
+                boolean considerGlobalLock = configuration.getConsiderGlobalLock();
                 JCoStructure islocked = function.getExportParameterList().getStructure("ISLOCKED");
-                Boolean enabledBefore = "U".equals(islocked.getString(LOCAL_LOCK)); // U - unlocked, L - locked
+                Boolean enabledBefore = isAccountEnabled(islocked, considerGlobalLock);
 
                 LOG.ok("lockoutStatus is set to: " + lockOut + ", enable: " + enable + ", readed administrative status from SAP: " + enabledBefore + ", unlocking acount and setting the same result");
                 enableOrDisableUser(true, userName);
