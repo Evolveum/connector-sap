@@ -17,7 +17,6 @@
 package com.evolveum.polygon.connector.sap;
 
 import com.sap.conn.jco.*;
-import org.identityconnectors.common.Base64;
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
@@ -1059,7 +1058,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             if (attrVal instanceof Date) {
                 builder.addAttribute(attrName, ((Date) attrVal).getTime());
             } else if (attrVal instanceof byte[]) {
-                builder.addAttribute(attrName, Base64.encode((byte[]) attrVal));
+                builder.addAttribute(attrName, ((byte[]) attrVal));
             } else {
                 builder.addAttribute(attrName, attrVal);
             }
