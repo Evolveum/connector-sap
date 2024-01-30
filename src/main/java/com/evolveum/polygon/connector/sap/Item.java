@@ -139,6 +139,10 @@ public class Item {
         return data;
     }
 
+    public boolean isXml() {
+        return isXml;
+    }
+
     @Override
     public String toString() {
         return "Item{" +
