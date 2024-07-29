@@ -582,6 +582,10 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     }
 
     private void executeTableQuery(String tableName, SapFilter query, ResultsHandler handler) {
+        List<ConnectorObject> handleObjectsExPost = new LinkedList<ConnectorObject>();
+        int numRows = 0;
+        Boolean isFindByKey = query != null && query.getBasicByNameEquals() != null;
+
         try {
             // find all or find by key
 
@@ -590,21 +594,23 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 throw new RuntimeException("RFC_GET_TABLE_ENTRIES not found in SAP.");
 
             function.getImportParameterList().setValue("TABLE_NAME", tableName);
+
             // find by key
-            if (query != null && query.getBasicByNameEquals() != null) {
-                function.getImportParameterList().setValue("GEN_KEY", query.getBasicByNameEquals());
+            if (isFindByKey) {
+                function.getImportParameterList().setValue("GEN_KEY", query.getBasicByNameEquals()); // this search does not use EQUALS operator but rather something similar to startsWith, also see support 9749
                 LOG.ok("query by Key: " + query.getBasicByNameEquals() + " on table: " + tableName);
             }
             // else find all
-
             function.execute(destination);
 
             JCoTable entries = function.getTableParameterList().getTable("ENTRIES");
 
             LOG.info("Entries: " + function.getExportParameterList().getValue("NUMBER_OF_ENTRIES"));
 
+            numRows = entries.getNumRows();
             entries.firstRow();
-            if (entries.getNumRows() > 0) {
+
+            if (numRows > 0) {
                 do {
                     String value = entries.getString("WA");
                     int index = 0;
@@ -648,7 +654,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
                     ConnectorObject build = builder.build();
                     LOG.ok("ConnectorObject: {0}", build);
-                    handler.handle(build);
+                    handleObjectsExPost.add(build);
 
                 } while (entries.nextRow());
             }
@@ -657,6 +663,19 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             if("TABLE_EMPTY".equals(e.getKey()))
                 return;
             throw new ConnectorIOException(e.getMessage(), e);
+        } finally {
+            for (ConnectorObject build : handleObjectsExPost) {
+                if (isFindByKey && numRows > 1) {
+                    // SAP returned multiple entries on UID search, we need to pick the best entry to pass to upper layer
+                    if (build.getUid().getUidValue().equalsIgnoreCase(query.getBasicByNameEquals())) {
+                        handler.handle(build);
+                        LOG.ok("ConnectorObject: {0} is being prioritized in UID search result after multiple entries were returned.", query.getBasicByNameEquals());
+                        break;
+                    }
+                } else {
+                    handler.handle(build);
+                }
+            }
         }
     }
 
