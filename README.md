@@ -1,3 +1,3 @@
-# ConnId Connector for SAP R/3
+# ConnId Connector for SAP ERP (BAPI)
 
-See https://wiki.evolveum.com/display/midPoint/SAP+Connector
+See https://docs.evolveum.com/connectors/connectors/com.evolveum.polygon.connector.sap.SapConnector/
