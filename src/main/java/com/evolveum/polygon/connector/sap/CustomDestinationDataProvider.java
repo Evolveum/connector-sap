@@ -19,9 +19,9 @@ package com.evolveum.polygon.connector.sap;
 import com.sap.conn.jco.ext.DestinationDataEventListener;
 import com.sap.conn.jco.ext.DestinationDataProvider;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Created by gpalos on 19. 1. 2016.
@@ -48,7 +48,8 @@ class CustomDestinationDataProvider implements DestinationDataProvider {
         return INSTANCE;
     }
 
-    private Map<String, Properties> propertiesMap = new HashMap<String, Properties>();
+    // ConcurrentHashMap prevents sporadic read-after-write races triggered by JCo 3.1's concurrent calls
+    private final Map<String, Properties> propertiesMap = new ConcurrentHashMap<String, Properties>();
 
     public Properties getDestinationProperties(String destinationName) {
         return propertiesMap.get(destinationName);
