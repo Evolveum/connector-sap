@@ -603,9 +603,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     }
 
     private void executeTableQuery(String tableName, SapFilter query, ResultsHandler handler) {
-        List<ConnectorObject> handleObjectsExPost = new LinkedList<ConnectorObject>();
         int numRows = 0;
-        Boolean isFindByKey = query != null && query.getBasicByNameEquals() != null;
+        boolean isFindByKey = query != null && query.getBasicByNameEquals() != null;
 
         try {
             // find all or find by key
@@ -632,6 +631,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             entries.firstRow();
 
             if (numRows > 0) {
+                boolean shouldContinue = true;
+                int handledObjects = 0;
                 do {
                     String value = entries.getString("WA");
                     int index = 0;
@@ -673,20 +674,9 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                         continue;
                     }
 
-                    if (configuration.getSubTablesMetadata().containsKey(tableName)) {
-                        for (SubTableMetadata subTables : configuration.getSubTablesMetadata().get(tableName)) {
-                            try {
-                                builder.addAttribute(subTables.getVirtualColumnName(),
-                                                     executeTableSubQuery(concatenatedKey.toString(), subTables, rootValues));
-                            } catch (JCoException e) {
-                                if ("TABLE_EMPTY".equals(e.getKey())) {
-                                    // Workaround to handle empty results
-                                    builder.addAttribute(subTables.getTableName(), new ArrayList<>());
-                                } else {
-                                    throw new ConnectorIOException("Error during sub-table query for " + subTables.getTableName() + ": " + e.getMessage(), e);
-                                }
-                            }
-                        }
+                    if (isFindByKey && !concatenatedKey.toString().equalsIgnoreCase(query.getBasicByNameEquals())) {
+                        // If a specific key is searched and the current row is not the searched one, skip the sub-table queries
+                        continue;
                     }
 
                     builder.setUid(concatenatedKey.toString());
@@ -695,30 +685,47 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                     ObjectClass objectClass = new ObjectClass(configuration.getTableAliases().get(tableName));
                     builder.setObjectClass(objectClass);
 
+                    if (query != null &&
+                        query.getInMemoryFilter() != null &&
+                        !query.getInMemoryFilter().accept(builder.build())) {
+                        // If an in-memory filter is specified, it has to match. Otherwise the current object should not be returned,
+                        continue;
+                    }
+
+                    if (configuration.getSubTablesMetadata().containsKey(tableName)) {
+                        for (SubTableMetadata subTables : configuration.getSubTablesMetadata().get(tableName)) {
+                            try {
+                                builder.addAttribute(subTables.getVirtualColumnName(),
+                                                     executeTableSubQuery(concatenatedKey.toString(), subTables,
+                                                                          rootValues));
+                            } catch (JCoException e) {
+                                if ("TABLE_EMPTY".equals(e.getKey())) {
+                                    // Workaround to handle empty results
+                                    builder.addAttribute(subTables.getVirtualColumnName(), new ArrayList<>());
+                                } else {
+                                    throw new ConnectorIOException(
+                                            "Error during sub-table query for " + subTables.getTableName() + ": " +
+                                            e.getMessage(), e);
+                                }
+                            }
+                        }
+                    }
+
                     ConnectorObject build = builder.build();
                     LOG.ok("ConnectorObject: {0}", build);
-                    handleObjectsExPost.add(build);
 
-                } while (entries.nextRow());
+                    // Only continue the processing, if the caller requests more ConnectorObjects
+                    shouldContinue = handler.handle(build);
+                    handledObjects++;
+
+                } while (entries.nextRow() && shouldContinue);
+                LOG.ok("Finished reading {0} objects of {1} query results", handledObjects, numRows);
             }
         } catch (JCoException e) {
             //there is no other way of checking this
             if("TABLE_EMPTY".equals(e.getKey()))
                 return;
             throw new ConnectorIOException(e.getMessage(), e);
-        } finally {
-            for (ConnectorObject build : handleObjectsExPost) {
-                if (isFindByKey && numRows > 1) {
-                    // SAP returned multiple entries on UID search, we need to pick the best entry to pass to upper layer
-                    if (build.getUid().getUidValue().equalsIgnoreCase(query.getBasicByNameEquals())) {
-                        handler.handle(build);
-                        LOG.ok("ConnectorObject: {0} is being prioritized in UID search result after multiple entries were returned.", query.getBasicByNameEquals());
-                        break;
-                    }
-                } else {
-                    handler.handle(build);
-                }
-            }
         }
     }
 

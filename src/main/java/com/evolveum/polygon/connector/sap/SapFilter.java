@@ -16,6 +16,7 @@
 package com.evolveum.polygon.connector.sap;
 
 import org.identityconnectors.common.logging.Log;
+import org.identityconnectors.framework.common.objects.filter.Filter;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -86,6 +87,8 @@ public class SapFilter {
      */
     private int arity;
 
+    private Filter inMemoryFilter;
+
     public SapFilter(String sapOperator, String attribute, String value) {
         this.setOption(sapOperator);
 
@@ -104,6 +107,10 @@ public class SapFilter {
 
     public SapFilter(String basicByNameEquals) {
         this.basicByNameEquals = basicByNameEquals;
+    }
+
+    public SapFilter(Filter inMemoryFilter) {
+        this.inMemoryFilter = inMemoryFilter;
     }
 
     public SapFilter(String logicalOperation, SapFilter leftExpression) {
@@ -229,6 +236,10 @@ public class SapFilter {
 
     public void setArity(int arity) {
         this.arity = arity;
+    }
+
+    public Filter getInMemoryFilter() {
+        return inMemoryFilter;
     }
 
     @Override

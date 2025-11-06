@@ -20,34 +20,37 @@ import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.objects.Attribute;
 import org.identityconnectors.framework.common.objects.Name;
 import org.identityconnectors.framework.common.objects.Uid;
-import org.identityconnectors.framework.common.objects.filter.AbstractFilterTranslator;
 import org.identityconnectors.framework.common.objects.filter.EqualsFilter;
+import org.identityconnectors.framework.common.objects.filter.Filter;
+import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
+
+import java.util.List;
 
 /**
  * Created by gpalos on 4. 7. 2016.
  */
-public class SapBasicFilterTranslator extends AbstractFilterTranslator<SapFilter> {
+public class SapBasicFilterTranslator implements FilterTranslator<SapFilter> {
     private static final Log LOG = Log.getLog(SapBasicFilterTranslator.class);
 
     @Override
-    protected SapFilter createEqualsExpression(EqualsFilter filter, boolean not) {
-        LOG.ok("createEqualsExpression, filter: {0}, not: {1}", filter, not);
+    public List<SapFilter> translate(Filter filter) {
+        if (filter instanceof EqualsFilter eqFilter) {
+            // Only the equals filter on root level can be converted to a BAPI filter
+            LOG.ok("createEqualsExpression, filter: {0}", filter);
 
-        if (not) {
-            return null;            // not supported attribute
-        }
-
-        Attribute attr = filter.getAttribute();
-        LOG.ok("attr.getId:  {0}, attr.getValue: {1}", attr.getName(), attr.getValue());
-        // filter by NAME is the same as by UID
-        if (Name.NAME.equals(attr.getName()) || Uid.NAME.equals(attr.getName())) {
-            if (attr.getValue() != null && attr.getValue().get(0) != null) {
-                SapFilter lf = new SapFilter(String.valueOf(attr.getValue().get(0)));
-                return lf;
+            Attribute attr = eqFilter.getAttribute();
+            LOG.ok("attr.getId:  {0}, attr.getValue: {1}", attr.getName(), attr.getValue());
+            // filter by NAME is the same as by UID
+            if (Name.NAME.equals(attr.getName()) || Uid.NAME.equals(attr.getName())) {
+                if (attr.getValue() != null && attr.getValue().get(0) != null) {
+                    SapFilter result = new SapFilter(filter);
+                    result.setBasicByNameEquals(String.valueOf(attr.getValue().get(0)));
+                    return List.of(result);
+                }
             }
         }
 
-        return null;            // not supported attribute
+        // All other filters can only be applied in memory
+        return List.of(new SapFilter(filter));
     }
-
 }
