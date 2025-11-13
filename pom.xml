@@ -27,7 +27,7 @@
 
     <groupId>com.evolveum.polygon</groupId>
     <artifactId>connector-sap</artifactId>
-    <version>1.2.1</version>
+    <version>1.3-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>SAP</name>
