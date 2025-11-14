@@ -28,12 +28,20 @@ import org.identityconnectors.framework.spi.Configuration;
 import org.identityconnectors.framework.spi.ConnectorClass;
 import org.identityconnectors.framework.spi.PoolableConnector;
 import org.identityconnectors.framework.spi.operations.*;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
+import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -145,6 +153,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     private Map<String, String> sapAttributesType = new HashMap<String, String>();
 
 	private SapFilter baseAccountQuery;
+
+    private Transformer xmlTransformer;
 
     @Override
     public Configuration getConfiguration() {
@@ -390,6 +400,17 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
             }
 
+            List<SubTableMetadata> subTables = configuration.getSubTablesMetadata().get(tableName);
+            if (subTables != null) {
+                for (SubTableMetadata subTable : subTables) {
+                    AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(subTable.getVirtualColumnName());
+                    attributeInfoBuilder.setCreateable(false);
+                    attributeInfoBuilder.setUpdateable(false);
+                    attributeInfoBuilder.setMultiValued(true);
+                    objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
+                }
+            }
+
             builder.defineObjectClass(objClassBuilder.build());
         }
     }
@@ -582,9 +603,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     }
 
     private void executeTableQuery(String tableName, SapFilter query, ResultsHandler handler) {
-        List<ConnectorObject> handleObjectsExPost = new LinkedList<ConnectorObject>();
         int numRows = 0;
-        Boolean isFindByKey = query != null && query.getBasicByNameEquals() != null;
+        boolean isFindByKey = query != null && query.getBasicByNameEquals() != null;
 
         try {
             // find all or find by key
@@ -611,6 +631,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             entries.firstRow();
 
             if (numRows > 0) {
+                boolean shouldContinue = true;
+                int handledObjects = 0;
                 do {
                     String value = entries.getString("WA");
                     int index = 0;
@@ -618,11 +640,17 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                     ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
                     List<String> keys = new LinkedList<String>();
 
+                    Map<String, String> rootValues = new LinkedHashMap<>();
+
                     for (Map.Entry<String, Integer> entry : configuration.getTableMetadatas().get(tableName).entrySet()) {
                         String column = entry.getKey();
                         Integer length = entry.getValue();
 
-                        String columnValue = value.substring(index, index + length).trim();
+                        int maxIndex = Math.min(index + length, value.length());
+                        String columnValue = value.substring(index, maxIndex).trim();
+
+                        rootValues.put(column, columnValue);
+
                         // ignore columns, what is selected as :IGNORE
                         if (!configuration.getTableIgnores().get(tableName).contains(column)) {
                             addAttr(builder, column, columnValue);
@@ -646,37 +674,152 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                         continue;
                     }
 
+                    if (isFindByKey && !concatenatedKey.toString().equalsIgnoreCase(query.getBasicByNameEquals())) {
+                        // If a specific key is searched and the current row is not the searched one, skip the sub-table queries
+                        continue;
+                    }
+
                     builder.setUid(concatenatedKey.toString());
                     builder.setName(concatenatedKey.toString());
 
                     ObjectClass objectClass = new ObjectClass(configuration.getTableAliases().get(tableName));
                     builder.setObjectClass(objectClass);
 
+                    if (query != null &&
+                        query.getInMemoryFilter() != null &&
+                        !query.getInMemoryFilter().accept(builder.build())) {
+                        // If an in-memory filter is specified, it has to match. Otherwise the current object should not be returned,
+                        continue;
+                    }
+
+                    if (configuration.getSubTablesMetadata().containsKey(tableName)) {
+                        for (SubTableMetadata subTables : configuration.getSubTablesMetadata().get(tableName)) {
+                            try {
+                                builder.addAttribute(subTables.getVirtualColumnName(),
+                                                     executeTableSubQuery(concatenatedKey.toString(), subTables,
+                                                                          rootValues));
+                            } catch (JCoException e) {
+                                if ("TABLE_EMPTY".equals(e.getKey())) {
+                                    // Workaround to handle empty results
+                                    builder.addAttribute(subTables.getVirtualColumnName(), new ArrayList<>());
+                                } else {
+                                    throw new ConnectorIOException(
+                                            "Error during sub-table query for " + subTables.getTableName() + ": " +
+                                            e.getMessage(), e);
+                                }
+                            }
+                        }
+                    }
+
                     ConnectorObject build = builder.build();
                     LOG.ok("ConnectorObject: {0}", build);
-                    handleObjectsExPost.add(build);
 
-                } while (entries.nextRow());
+                    // Only continue the processing, if the caller requests more ConnectorObjects
+                    shouldContinue = handler.handle(build);
+                    handledObjects++;
+
+                } while (entries.nextRow() && shouldContinue);
+                LOG.ok("Finished reading {0} objects of {1} query results", handledObjects, numRows);
             }
         } catch (JCoException e) {
             //there is no other way of checking this
             if("TABLE_EMPTY".equals(e.getKey()))
                 return;
             throw new ConnectorIOException(e.getMessage(), e);
-        } finally {
-            for (ConnectorObject build : handleObjectsExPost) {
-                if (isFindByKey && numRows > 1) {
-                    // SAP returned multiple entries on UID search, we need to pick the best entry to pass to upper layer
-                    if (build.getUid().getUidValue().equalsIgnoreCase(query.getBasicByNameEquals())) {
-                        handler.handle(build);
-                        LOG.ok("ConnectorObject: {0} is being prioritized in UID search result after multiple entries were returned.", query.getBasicByNameEquals());
-                        break;
-                    }
-                } else {
-                    handler.handle(build);
-                }
-            }
         }
+    }
+
+    private List<String> executeTableSubQuery(String queryKey, SubTableMetadata metadata, Map<String, String> rootValues) throws JCoException {
+        JCoFunction function = destination.getRepository().getFunction("RFC_GET_TABLE_ENTRIES");
+        if (function == null) {
+            throw new RuntimeException("RFC_GET_TABLE_ENTRIES not found in SAP.");
+        }
+
+        // this search does not use EQUALS operator but rather something similar to startsWith, also see support 9749
+        function.getImportParameterList().setValue("TABLE_NAME", metadata.getTableName());
+        function.getImportParameterList().setValue("GEN_KEY", queryKey);
+        LOG.ok("sub-query by key: " + queryKey + " on table: " + metadata.getTableName());
+
+        function.execute(destination);
+
+        JCoTable entries = function.getTableParameterList().getTable("ENTRIES");
+        LOG.info("Entries: " + function.getExportParameterList().getValue("NUMBER_OF_ENTRIES"));
+
+        int numRows = entries.getNumRows();
+        entries.firstRow();
+        List<String> values = new ArrayList<>();
+
+        if (numRows > 0) {
+            do {
+                String value = entries.getString("WA");
+
+                Map<String, String> columnValues = new LinkedHashMap<>();
+                boolean matches = true;
+
+                for (TableColumnDefinition column : metadata.getColumns()) {
+                    int minIndex = Math.min(column.getOffset(), value.length());
+                    int maxIndex = Math.min(column.getOffset() + column.getLength(), value.length());
+                    String columnValue = value.substring(minIndex, maxIndex).trim();
+
+                    if (column.getFilterConstant() != null && !column.getFilterConstant().equals(columnValue)) {
+                        matches = false;
+                    }
+                    if (column.getMode() == TableColumnDefinition.Mode.OUTPUT) {
+                        columnValues.put(column.getColumnName(), columnValue);
+                    } else if(column.getMode() == TableColumnDefinition.Mode.MATCH) {
+                        if (!rootValues.getOrDefault(column.getColumnName(), "").equals(columnValue)) {
+                            matches = false;
+                        }
+                    }
+                }
+
+                if (!matches) {
+                    // There might be rows, that should not be included.
+                    // The reason for possibility is the query method (similar to startsWith see support 9749).
+                    // If one object has a key that is the prefix of another object's key, both results would be included.
+                    // Example:
+                    //   Role 1: ROLE_DEVELOPER
+                    //   Role 2: ROLE_DEVELOPER_READ
+                    // Searching in any table for "ROLE_DEVELOPER" will also return all rows that belong to "ROLE_DEVELOPER_READ"
+                    continue;
+                }
+
+                if (metadata.getFormat() == SubTableMetadata.Format.XML) {
+                    try (StringWriter writer = new StringWriter()) {
+                        if (xmlTransformer == null) {
+                            xmlTransformer = TransformerFactory.newInstance().newTransformer();
+                        }
+
+                        Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
+                        Element root = document.createElement("item");
+                        document.appendChild(root);
+
+                        for (Map.Entry<String, String> entry : columnValues.entrySet()) {
+                            Element item = document.createElement(entry.getKey());
+                            item.appendChild(document.createTextNode(entry.getValue()));
+                            root.appendChild(item);
+                        }
+                        xmlTransformer.transform(new DOMSource(document), new StreamResult(writer));
+                        values.add(writer.toString());
+                    } catch (TransformerException | ParserConfigurationException | IOException e) {
+                        throw new ConnectorIOException("Could not format row as XML: " + e.getMessage(), e);
+                    }
+
+                } else if (metadata.getFormat() == SubTableMetadata.Format.TSV) {
+                    StringBuilder row = new StringBuilder();
+                    for (Map.Entry<String, String> entry : columnValues.entrySet()) {
+                        if (!row.isEmpty()) {
+                            row.append("\t");
+                        }
+                        row.append(entry.getValue());
+                    }
+                    values.add(row.toString());
+                }
+
+            } while (entries.nextRow());
+        }
+
+        return values;
     }
 
     private void executeAccountQuery(SapFilter query, ResultsHandler handler, OperationOptions options) {
