@@ -155,6 +155,65 @@ public class SapConfiguration extends AbstractConfiguration {
     private String[] tables = {"AGR_DEFINE as ACTIVITYGROUP=MANDT:3:IGNORE,AGR_NAME:30:KEY,PARENT_AGR:30", "USGRP as GROUP=MANDT:3:IGNORE,USERGROUP:12:KEY"};
 
     /**
+     * Defines additional tables, that should be queried for each table result.
+     * Each config item has this pattern:
+     * <br/>
+     * {@code <tableDefinition>=<columnDefinition>[;<columnDefinition>[...]]}
+     * <br/>
+     * The {@code tableDefinition} uses this pattern:
+     * {@code <tableName> for <rootTableName>[ format <formatType>][ as <virtualColumnName>]}
+     * <br/>
+     * The {@code columnDefinition} uses this pattern:
+     * {@code <columnName>:<size>[("<filterValue>")][:<syncMode>]}
+     * <br/>
+     * <br/>
+     * These restrictions apply for the table definition:
+     * <ul>
+     *     <li>{@code tableName}: name of a SAP table</li>
+     *     <li>{@code rootTableName}: name of a SAP table, that is defined by the "tables" configuration</li>
+     *     <li>{@code formatType}:
+     *         <ul>
+     *             <li>{@code XML} (default if unset; each column name will be returned as individual XML tag)</li>
+     *             <li>{@code TSV} (TAB-separated values)</li>
+     *         </ul>
+     *     </li>
+     *     <li>{@code virtualColumnName}: name of the ConnId attribute in the containing ObjectClass, that will contain the query sub-result</li>
+     * </ul>
+     * These restrictions apply for the column definition:
+     * <ul>
+     *     <li>{@code columnName}: should be a column name of the SAP table, but is manly used to structure the output</li>
+     *     <li>{@code size}: number of characters of this column</li>
+     *     <li>{@code filterValue}: can be used to select only rows with a predefined constant value. The value has to be enclosed by ("...")</li>
+     *     <li>{@code syncMode}:
+     *         <ul>
+     *             <li>{@code OUTPUT} (default if unset; will include the column in the result)</li>
+     *             <li>{@code IGNORE} (will ignore the column)</li>
+     *             <li>{@code MATCH} (value has to match with identically named column in the root result; This should be specified for the key column because of prefix-matching issues in the BAPI call)</li>
+     *         </ul>
+     *     </li>
+     * </ul>
+     * <br/>
+     * This is an example to load the short description of an ActivityGroup:
+     * <br/>
+     * {@code AGR_TEXTS for AGR_DEFINE format TSV as ShortDescription=MANDT:3:IGNORE,AGR_NAME:30:MATCH,SPRAS:1("E"):IGNORE,LINE:5("00000"):IGNORE,TEXT:80}
+     * <br/>
+     * This queries the row with language "E" (english) and line number "00000" of AGR_TEXTS, selects the TEXT column
+     * and returns it as ConnId attribute "ShortDescription" (by SAP convention, the line 0 represents the short description
+     * of a role, all following lines combined are the long description).
+     * <br/>
+     * <br/>
+     * This is an example to load the names of all single roles, that are referenced by a composite role:
+     * <br/>
+     * {@code AGR_AGRS for AGR_DEFINE format TSV=MANDT:3:IGNORE,AGR_NAME:30:MATCH,CHILD_AGR:30,ATTRIBUTES:10:IGNORE}
+     * <br/>
+     * <br/>
+     * This is an example to load all role flags as XML (role flags include for example the value COLL_AGR="X" for composite roles):
+     * <br/>
+     * {@code AGR_FLAGS for AGR_DEFINE format XML=MANDT:3:IGNORE,AGR_NAME:30:MATCH,FLAG_TYPE:10,MISC:52:IGNORE,FLAG_VALUE:32}
+     */
+    private String[] subTables = {};
+
+    /**
      * this tables also have a simplified representation of his tables over his keys to comfortable use in mappings, for example ACTIVITYGROUPS.AGR_NAME
      */
     private String[] tableParameterNames = {"PROFILES", "ACTIVITYGROUPS", "GROUPS"};
@@ -180,6 +239,11 @@ public class SapConfiguration extends AbstractConfiguration {
      * SAP table name to midPoint objectClass mapping
      */
     private Map<String, String> tableAliases = new LinkedHashMap<String, String>();
+
+    /**
+     * Extra tables, that should be fetched for each table row.
+     */
+    private Map<String, List<SubTableMetadata>> subTablesMetadata = new LinkedHashMap<>();
 
     /**
      * which SAP error codes are considered as non-fatal, for example 025 (Company address cannot be selected), 410 (Maintenance of user user1 locked by user midpoint)
@@ -221,6 +285,7 @@ public class SapConfiguration extends AbstractConfiguration {
         }
 
         parseTableDefinitions();
+        parseSubTableDefinitions();
 
         checkParameterNames();
         
@@ -326,6 +391,18 @@ public class SapConfiguration extends AbstractConfiguration {
         }
     }
 
+    void parseSubTableDefinitions() {
+        if (subTables == null) {
+            subTables = new String[0];
+        }
+
+        for (String def : subTables) {
+            SubTableMetadata metadata = SubTableMetadata.parseConfig(def);
+
+            subTablesMetadata.computeIfAbsent(metadata.getRootTableName(), a -> new ArrayList<>()).add(metadata);
+        }
+    }
+
     @Override
     public String toString() {
         return "SapConfiguration{" +
@@ -366,6 +443,8 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", hideIndirectActivitygroups=" + hideIndirectActivitygroups +
                 ", nonFatalErrorCodes='" + Arrays.toString(nonFatalErrorCodes) +
                 ", pwdChangeErrorIsFatal=" + pwdChangeErrorIsFatal +
+                ", subTables=" + Arrays.toString(subTables) +
+                ", subTablesMetadata=" + subTablesMetadata +
                 '}';
     }
 
@@ -689,7 +768,7 @@ public class SapConfiguration extends AbstractConfiguration {
     public void setTraceLevel(String traceLevel) {
         this.traceLevel = traceLevel;
     }
-    
+
     @ConfigurationProperty(order = 32, displayMessageKey = "sap.config.tracePath",
             helpMessageKey = "sap.config.tracePath.help")
     public String getTracePath() {
@@ -699,7 +778,7 @@ public class SapConfiguration extends AbstractConfiguration {
     public void setTracePath(String tracePath) {
         this.tracePath = tracePath;
     }
-    
+
     @ConfigurationProperty(order = 33, displayMessageKey = "sap.config.read.only.params",
             helpMessageKey = "sap.config.read.only.params.help")
     public String[] getReadOnlyParams() {
@@ -756,7 +835,7 @@ public class SapConfiguration extends AbstractConfiguration {
         this.baseAccountQuery = baseAccountQuery;
 	}
 
-	@ConfigurationProperty(order = 38, displayMessageKey = "sap.config.considerGlobalLock", 
+	@ConfigurationProperty(order = 38, displayMessageKey = "sap.config.considerGlobalLock",
 			helpMessageKey = "sap.config.considerGlobalLock.help")
 	public boolean getConsiderGlobalLock() {
 		return this.considerGlobalLock;
@@ -765,6 +844,16 @@ public class SapConfiguration extends AbstractConfiguration {
 	public void setConsiderGlobalLock(boolean considerGlobalLock) {
 		this.considerGlobalLock = considerGlobalLock;
 	}
+
+    @ConfigurationProperty(order = 39, displayMessageKey = "sap.config.subTables",
+                           helpMessageKey = "sap.config.subTables.help")
+    public String[] getSubTables() {
+        return subTables;
+    }
+
+    public void setSubTables(String[] subTables) {
+        this.subTables = subTables;
+    }
 
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
@@ -853,4 +942,7 @@ public class SapConfiguration extends AbstractConfiguration {
         return tableAliases;
     }
 
+    public Map<String, List<SubTableMetadata>> getSubTablesMetadata() {
+        return subTablesMetadata;
+    }
 }
