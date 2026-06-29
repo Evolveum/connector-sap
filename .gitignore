@@ -22,5 +22,10 @@ hs_err_pid*
 # DO NOT remove - contains client's sensitive data
 Prototype.java
 test.properties
-testChangePass.properties
 .idea
+
+# JCo runtime trace/log artifacts
+dev_jco*.log
+dev_rfc*.log
+*.trc
+*.jcoDestination

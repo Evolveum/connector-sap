@@ -1,0 +1,99 @@
+# Example connection settings for the live SAP tests (TestClient, SapReadTableLiveTest).
+#
+# Copy this file to "test.properties" in the same directory (src/test/resources) and fill in your
+# values. "test.properties" is git-ignored on purpose - it holds credentials and must NOT be committed.
+# When "test.properties" is absent, SapReadTableLiveTest is skipped automatically.
+
+# --- midPoint endpoint (SapResourceLiveTest only) ---
+# SapResourceLiveTest drives a running midPoint server (the docker/ test rig) over REST instead of the
+# connector directly. These default to the docker rig; override only if your midPoint differs. The test
+# is skipped automatically when midPoint is unreachable or the template resource is missing.
+#midpoint.url=http://localhost:11080/midpoint
+#midpoint.user=administrator
+#midpoint.password=T3stPw890uio
+# OID of the abstract resource template deployed by docker/deploy-connector.sh (the test resources
+# inherit it for the connection settings).
+#midpoint.templateOid=f698ab61-55f4-4eec-bba4-81da4b9f52d8
+
+# --- connection ---
+host=sap.example.com
+systemNumber=00
+# r3name maps to the connector's systemId
+r3name=NPL
+client=001
+user=MIDPOINT
+password=CHANGE_ME
+lang=EN
+
+# message-server / load balancing (optional, instead of host/systemNumber)
+#loadBalancing=true
+#logonGroup=PUBLIC
+#port=3600
+
+# SNC / certificate based logon (optional, avoids the plaintext password above)
+#sncMode=1
+#sncMyName=p:CN=MIDPOINT, O=EXAMPLE, C=DE
+#sncPartnerName=p:CN=NPL, O=EXAMPLE, C=DE
+#sncLibrary=/usr/sap/sapcryptolib/libsapcrypto.so
+#sncQoP=9
+
+# --- table reading (this is what the RFC_READ_TABLE feature exercises) ---
+# RFC_GET_TABLE_ENTRIES (default, legacy positional col:len:KEY syntax) or
+# RFC_READ_TABLE / BBP_RFC_READ_TABLE / a custom Z-FM with the same interface.
+tableReadFunction=RFC_READ_TABLE
+
+# Multiple table definitions are separated by ';' (it is a single property value).
+# In RFC_READ_TABLE mode the table name alone is enough; "as ALIAS" is optional, ":len" is ignored,
+# ":KEY" overrides the DDIC key, ":IGNORE" drops a column, and an optional trailing "WHERE <clause>"
+# is passed as OPTIONS. A WHERE clause must not contain ';'.
+tables=AGR_DEFINE as ACTIVITYGROUP;USGRP as GROUP
+
+# Example with a WHERE clause (single-role / non-composite roles only):
+#tables=AGR_DEFINE as ACTIVITYGROUP WHERE PARENT_AGR <> '';USGRP as GROUP
+
+# BAPI table parameters exposed as multi-valued account attributes (separated by ';').
+tableParameterNames=PROFILES;ACTIVITYGROUPS;GROUPS
+
+# --- test user / password (all optional) ---
+# Test user name prefix; the test user is <prefix>1 (default "Evol-" -> EVOL-1). Use this to match
+# a naming namespace allowed on your system.
+#test.userPrefix=Evol-
+# Base password for created test users (default "Test1234"). Set this if your SAP password policy
+# rejects the default. The update and change-password tests append a single digit ("...1"/"...2"),
+# so the value must remain policy-compliant with one extra character.
+#test.password=Test1234
+# User parameter used by testSetXmlParameter/testDeleteParameter. Default SCL (upper/lower case in
+# source code), which SAP assigns to new users by default. Set these if SCL is not present on your
+# system. (PARAMETER1 and ADDTEL are added to the read-back schema automatically for these tests.)
+#test.parameterId=SCL
+#test.parameterValue=X
+
+# --- test objects (all optional) ---
+# TestClient no longer hard-codes SAP objects. Each test object is resolved as:
+#   value below  ->  a standard SAP object that exists  ->  the first object discovered on the system.
+# Leave them unset to let the tests adapt to whatever system they run against; set them to pin
+# specific objects. If none can be resolved, the dependent test is skipped (not failed).
+#
+# Roles have no universal standard, so they are discovered (e.g. SAP_CO_EASY_COST_PLANNING on a
+# fresh system). Profiles/groups/users fall back to SAP standards: S_A.SYSTEM, SUPER, DDIC.
+#test.role=
+#test.role2=
+#test.profile=          # standard fallback: S_A.SYSTEM (then SAP_ALL)
+#test.group=            # standard fallback: SUPER
+#test.filterProfile=    # standard fallback: SAP_ALL (superusers hold it -> deterministic filters)
+#test.user=             # an existing account; standard fallback: DDIC
+
+# Optional UCLASS license fields for testUpdateFull (system-specific; a license type must be active
+# on the system). Unset = not exercised. Set all four to test license handling.
+#test.update.licType=
+#test.update.sysid=
+#test.update.client=
+#test.update.bnameChargeable=
+
+# Legacy test objects (the values these tests used before they became configurable; kept for
+# reference - they exist on the original author's SAP system, not necessarily on yours):
+#   role:           ZBC_ADM_BENUTZERADMINISTRATOR, ZBC_ADM_ENTWICKLER_ANZEIGE, ZBC_ADM_BATCH_ADMIN,
+#                   SAPCRM_DEVELOPER, ZBC_WWK_ENDUSER, ZSR_ADM_IT
+#   profile:        B_ALE_ALL, B_ALE_GRP_AD, &_SAP_ALL_00, SAP_ALL
+#   group:          SUPER, BLS-AL
+#   UCLASS update:  licType=11, sysid=E01, client=200, bnameChargeable=BEK.MI

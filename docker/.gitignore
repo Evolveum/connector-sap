@@ -1,0 +1,6 @@
+# SAP JCo binaries are licensed and must not be committed
+jco/sapjco3.jar
+jco/*.so
+jco/*.dll
+jco/*.dylib
+.DS_Store

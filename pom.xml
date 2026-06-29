@@ -75,15 +75,38 @@
         </plugins>
     </build>
 
+    <dependencyManagement>
+        <dependencies>
+            <!-- Keep the whole JUnit Platform aligned with junit-jupiter 5.9.1; testng-engine
+                 otherwise drags in an older junit-platform (1.7.2) and breaks Jupiter discovery. -->
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>5.9.1</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
-        <!-- first please install jco to local maven repository, for example:
-            mvn install:install-file -Dfile="pathTo\sapjco3-NTAMD64-3.1.12\sapjco3.jar" -DgroupId=com.sap.conn.jco -DartifactId=sapjco -Dversion=3.1.12 -Dpackaging=jar
+        <!-- SAP JCo is not on Maven Central and must not be bundled (midPoint provides it at runtime),
+             so install it into the local Maven repository once, for example:
+            mvn install:install-file -Dfile="pathTo\sapjco3-NTAMD64-3.1.13\sapjco3.jar" -DgroupId=com.sap.conn.jco -DartifactId=sapjco -Dversion=3.1.13 -Dpackaging=jar
         -->
         <dependency>
             <groupId>com.sap.conn.jco</groupId>
             <artifactId>sapjco</artifactId>
             <scope>provided</scope>
-            <version>3.1.12</version>
+            <version>3.1.13</version>
+        </dependency>
+        <!-- Run the TestNG tests (TestClient) under the JUnit Platform that surefire uses,
+             so they are executable via 'mvn test' alongside the JUnit 5 tests. -->
+        <dependency>
+            <groupId>org.junit.support</groupId>
+            <artifactId>testng-engine</artifactId>
+            <version>1.0.4</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

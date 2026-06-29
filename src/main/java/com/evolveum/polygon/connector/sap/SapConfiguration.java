@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010-2016 Evolveum
+ * Copyright (c) 2026 IS4IT
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +26,8 @@ import org.identityconnectors.framework.spi.AbstractConfiguration;
 import org.identityconnectors.framework.spi.ConfigurationProperty;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.identityconnectors.common.StringUtil.isBlank;
 import static org.identityconnectors.common.StringUtil.isNotEmpty;
@@ -155,13 +158,61 @@ public class SapConfiguration extends AbstractConfiguration {
     private String[] tables = {"AGR_DEFINE as ACTIVITYGROUP=MANDT:3:IGNORE,AGR_NAME:30:KEY,PARENT_AGR:30", "USGRP as GROUP=MANDT:3:IGNORE,USERGROUP:12:KEY"};
 
     /**
+     * SAP function module used to read the tables defined above.
+     * <ul>
+     *     <li>{@code RFC_GET_TABLE_ENTRIES} (default) keeps the legacy behaviour: each table line must
+     *         use the positional {@code col:len[:KEY|:IGNORE]} syntax and lengths are mandatory.</li>
+     *     <li>{@code RFC_READ_TABLE} (or {@code BBP_RFC_READ_TABLE} / a custom Z-FM with the same
+     *         OPTIONS/FIELDS/DATA/ET_DATA interface) enables the self-describing path: column lengths
+     *         are read from SAP, keys default to the DDIC primary key (MANDT excluded), an optional
+     *         trailing {@code WHERE <clause>} is passed as OPTIONS, and ET_DATA / server-side sort are
+     *         used automatically when the target system supports them.</li>
+     * </ul>
+     * Legacy table lines keep working when switching to RFC_READ_TABLE (lengths are ignored, :KEY becomes
+     * a key override, :IGNORE still drops the column). The reverse switch may break, because RFC_READ_TABLE
+     * lines do not have to carry lengths.
+     */
+    public static final String FN_GET_TABLE_ENTRIES = "RFC_GET_TABLE_ENTRIES";
+    public static final String FN_READ_TABLE = "RFC_READ_TABLE";
+    public static final String FN_BBP_READ_TABLE = "BBP_RFC_READ_TABLE";
+
+    private String tableReadFunction = FN_GET_TABLE_ENTRIES;
+
+    /** matches the optional trailing " WHERE <clause>" in a table definition (RFC_READ_TABLE mode) */
+    private static final Pattern TABLE_WHERE_PATTERN = Pattern.compile("(?i)\\s+WHERE\\s+");
+
+    /**
      * Defines additional tables, that should be queried for each table result.
+     * <br/>
+     * The {@code for <rootAlias>} part references the object class (the "tables" alias), not the SAP table
+     * name, so a sub-table attaches to exactly one object type even when several share a SAP table. With
+     * {@code tables = AGR_DEFINE as ACTIVITYGROUP} the sub-table reads {@code ... for ACTIVITYGROUP ...}.
+     * <br/>
+     * In RFC_READ_TABLE mode (see {@code tableReadFunction}) the same definitions are reused, but the
+     * fixed-width {@code :<size>} of each column is ignored (data is read by field name, not by offset),
+     * so you only need the MATCH and filter columns plus the OUTPUT columns; an optional trailing
+     * {@code WHERE <clause>} may be appended for extra filtering. The MATCH columns become a server-side
+     * join on the root row value and the {@code ("value")} filter constants become WHERE equalities, e.g.
+     * {@code AGR_TEXTS for ACTIVITYGROUP format TSV as ShortDescription=AGR_NAME:MATCH,SPRAS("E"):IGNORE,LINE("00000"):IGNORE,TEXT}.
+     * <br/>
+     * Since a {@code ("value")} filter is just a static condition, you can equivalently write it in the
+     * trailing WHERE instead, in which case the filtered columns need not be listed at all - the example
+     * above is the same as
+     * {@code AGR_TEXTS for ACTIVITYGROUP format TSV as ShortDescription=AGR_NAME:MATCH,TEXT WHERE SPRAS = 'E' AND LINE = '00000'}.
+     * <br/>
+     * The WHERE may also reference a root field as {@code <rootAlias>.<field>}; it is replaced with that
+     * field's value from the current root row before the sub-query runs. This expresses the join directly
+     * and, unlike a MATCH column, works across fields with different names in the two tables (SAP often
+     * names the same logical content differently, e.g. VALIDFROM vs BEGDA or PERNR vs OBJID), e.g.
+     * {@code AGR_TEXTS for ACTIVITYGROUP format TSV as ShortDescription=TEXT WHERE AGR_NAME = ACTIVITYGROUP.AGR_NAME AND SPRAS = 'E' AND LINE = '00000'}
+     * or, for a root {@code HRP1000 as ORGUNITS}, {@code HRP1001 for ORGUNITS ... =STEXT WHERE OBJID = ORGUNITS.PERNR}.
+     * <br/>
      * Each config item has this pattern:
      * <br/>
      * {@code <tableDefinition>=<columnDefinition>[;<columnDefinition>[...]]}
      * <br/>
      * The {@code tableDefinition} uses this pattern:
-     * {@code <tableName> for <rootTableName>[ format <formatType>][ as <virtualColumnName>]}
+     * {@code <tableName> for <rootAlias>[ format <formatType>][ as <virtualColumnName>]}
      * <br/>
      * The {@code columnDefinition} uses this pattern:
      * {@code <columnName>:<size>[("<filterValue>")][:<syncMode>]}
@@ -170,7 +221,8 @@ public class SapConfiguration extends AbstractConfiguration {
      * These restrictions apply for the table definition:
      * <ul>
      *     <li>{@code tableName}: name of a SAP table</li>
-     *     <li>{@code rootTableName}: name of a SAP table, that is defined by the "tables" configuration</li>
+     *     <li>{@code rootAlias}: the object class (the alias from the "tables" configuration) whose objects
+     *         this sub-table is attached to</li>
      *     <li>{@code formatType}:
      *         <ul>
      *             <li>{@code XML} (default if unset; each column name will be returned as individual XML tag)</li>
@@ -188,14 +240,14 @@ public class SapConfiguration extends AbstractConfiguration {
      *         <ul>
      *             <li>{@code OUTPUT} (default if unset; will include the column in the result)</li>
      *             <li>{@code IGNORE} (will ignore the column)</li>
-     *             <li>{@code MATCH} (value has to match with identically named column in the root result; This should be specified for the key column because of prefix-matching issues in the BAPI call)</li>
+     *             <li>{@code MATCH} (value has to match with the identically named column in the root result; This should be specified for the key column because of prefix-matching issues in the BAPI call. To join on a differently named root field, reference it in the WHERE as {@code <rootAlias>.<field>} instead - RFC_READ_TABLE only)</li>
      *         </ul>
      *     </li>
      * </ul>
      * <br/>
      * This is an example to load the short description of an ActivityGroup:
      * <br/>
-     * {@code AGR_TEXTS for AGR_DEFINE format TSV as ShortDescription=MANDT:3:IGNORE,AGR_NAME:30:MATCH,SPRAS:1("E"):IGNORE,LINE:5("00000"):IGNORE,TEXT:80}
+     * {@code AGR_TEXTS for ACTIVITYGROUP format TSV as ShortDescription=MANDT:3:IGNORE,AGR_NAME:30:MATCH,SPRAS:1("E"):IGNORE,LINE:5("00000"):IGNORE,TEXT:80}
      * <br/>
      * This queries the row with language "E" (english) and line number "00000" of AGR_TEXTS, selects the TEXT column
      * and returns it as ConnId attribute "ShortDescription" (by SAP convention, the line 0 represents the short description
@@ -204,12 +256,12 @@ public class SapConfiguration extends AbstractConfiguration {
      * <br/>
      * This is an example to load the names of all single roles, that are referenced by a composite role:
      * <br/>
-     * {@code AGR_AGRS for AGR_DEFINE format TSV=MANDT:3:IGNORE,AGR_NAME:30:MATCH,CHILD_AGR:30,ATTRIBUTES:10:IGNORE}
+     * {@code AGR_AGRS for ACTIVITYGROUP format TSV=MANDT:3:IGNORE,AGR_NAME:30:MATCH,CHILD_AGR:30,ATTRIBUTES:10:IGNORE}
      * <br/>
      * <br/>
      * This is an example to load all role flags as XML (role flags include for example the value COLL_AGR="X" for composite roles):
      * <br/>
-     * {@code AGR_FLAGS for AGR_DEFINE format XML=MANDT:3:IGNORE,AGR_NAME:30:MATCH,FLAG_TYPE:10,MISC:52:IGNORE,FLAG_VALUE:32}
+     * {@code AGR_FLAGS for ACTIVITYGROUP format XML=MANDT:3:IGNORE,AGR_NAME:30:MATCH,FLAG_TYPE:10,MISC:52:IGNORE,FLAG_VALUE:32}
      */
     private String[] subTables = {};
 
@@ -223,25 +275,33 @@ public class SapConfiguration extends AbstractConfiguration {
      */
     private String[] readOnlyParams = {};
 
+    // The maps below are keyed by ALIAS (the object class), not by SAP table name, so the same SAP table
+    // can back several object types (e.g. AGR_DEFINE as ACTIVITYGROUP and AGR_DEFINE as AUDITROLES with
+    // different WHERE clauses). The underlying SAP table for an alias is in tableNames.
     /**
-     * which SAP table which columns and which length has
+     * per object class (alias): its columns and their length (legacy RFC_GET_TABLE_ENTRIES mode)
      */
     private Map<String, Map<String, Integer>> tableMetadatas = new LinkedHashMap<String, Map<String, Integer>>();
     /**
-     * which columns are in which SAP table keys
+     * per object class (alias): which columns are the key
      */
     private Map<String, List<String>> tableKeys = new LinkedHashMap<String, List<String>>();
     /**
-     * which columns are ignored
+     * per object class (alias): which columns are ignored
      */
     private Map<String, List<String>> tableIgnores = new LinkedHashMap<String, List<String>>();
     /**
-     * SAP table name to midPoint objectClass mapping
+     * midPoint objectClass (alias) to SAP table name mapping
      */
-    private Map<String, String> tableAliases = new LinkedHashMap<String, String>();
+    private Map<String, String> tableNames = new LinkedHashMap<String, String>();
 
     /**
-     * Extra tables, that should be fetched for each table row.
+     * optional WHERE clause per object class (alias), passed as RFC_READ_TABLE OPTIONS (RFC_READ_TABLE mode only)
+     */
+    private Map<String, String> tableWhere = new LinkedHashMap<String, String>();
+
+    /**
+     * Extra tables, that should be fetched for each table row. Keyed by the root SAP table name.
      */
     private Map<String, List<SubTableMetadata>> subTablesMetadata = new LinkedHashMap<>();
 
@@ -284,7 +344,11 @@ public class SapConfiguration extends AbstractConfiguration {
             throw new ConfigurationException("client is empty");
         }
 
-        parseTableDefinitions();
+        if (isReadTableMode()) {
+            parseReadTableDefinitions();
+        } else {
+            parseTableDefinitions();
+        }
         parseSubTableDefinitions();
 
         checkParameterNames();
@@ -326,6 +390,7 @@ public class SapConfiguration extends AbstractConfiguration {
     }
 
     void parseTableDefinitions() {
+        clearTableMaps();
         // if empty, update length
         if (tables != null && tables.length == 1 && "".equals(tables[0])) {
             tables = new String[0];
@@ -383,24 +448,139 @@ public class SapConfiguration extends AbstractConfiguration {
                     throw new ConfigurationException("please select at least one column as a KEY for example: 'AGR_NAME:30:KEY'");
                 }
 
-                tableMetadatas.put(tableName, tableMetadata);
-                tableKeys.put(tableName, keys);
-                tableIgnores.put(tableName, ignore);
-                tableAliases.put(tableName, tableAlias);
+                registerObjectType(tableAlias, tableName);
+                tableMetadatas.put(tableAlias, tableMetadata);
+                tableKeys.put(tableAlias, keys);
+                tableIgnores.put(tableAlias, ignore);
             }
         }
     }
 
+    /** Registers an alias -&gt; SAP table mapping, rejecting a duplicate alias (it would shadow an object class). */
+    private void registerObjectType(String alias, String tableName) {
+        if (tableNames.containsKey(alias)) {
+            throw new ConfigurationException("duplicate object type alias '" + alias
+                    + "' in the 'tables' configuration; each alias (object class) must be unique");
+        }
+        tableNames.put(alias, tableName);
+    }
+
+    /** Resets the per-object-class table maps so parsing (hence validate()) can be repeated idempotently. */
+    private void clearTableMaps() {
+        tableNames.clear();
+        tableMetadatas.clear();
+        tableKeys.clear();
+        tableIgnores.clear();
+        tableWhere.clear();
+    }
+
     void parseSubTableDefinitions() {
+        subTablesMetadata.clear();
         if (subTables == null) {
             subTables = new String[0];
         }
 
+        // runs after parseTableDefinitions()/parseReadTableDefinitions() in validate(), so tableNames
+        // (alias -> SAP table) is populated and the root alias can be checked
         for (String def : subTables) {
-            SubTableMetadata metadata = SubTableMetadata.parseConfig(def);
+            SubTableMetadata metadata = SubTableMetadata.parseConfig(def, isReadTableMode());
 
-            subTablesMetadata.computeIfAbsent(metadata.getRootTableName(), a -> new ArrayList<>()).add(metadata);
+            if (!tableNames.containsKey(metadata.getRootAlias())) {
+                throw new ConfigurationException("sub-table '" + def + "' refers to root object class '"
+                        + metadata.getRootAlias() + "' (after 'for'), which is not defined in 'tables'; "
+                        + "use one of " + tableNames.keySet());
+            }
+            subTablesMetadata.computeIfAbsent(metadata.getRootAlias(), a -> new ArrayList<>()).add(metadata);
         }
+    }
+
+    public boolean isReadTableMode() {
+        return tableReadFunction != null && !FN_GET_TABLE_ENTRIES.equalsIgnoreCase(tableReadFunction.trim());
+    }
+
+    /**
+     * Lenient parser used in RFC_READ_TABLE mode. Grammar per line:
+     * <pre>TABLE [as ALIAS] [= col[:len][:KEY|:IGNORE], ...] [WHERE &lt;clause&gt;]</pre>
+     * Column lengths are ignored (read from SAP), {@code :KEY} overrides the DDIC key, {@code :IGNORE}
+     * drops a column. Legacy RFC_GET_TABLE_ENTRIES table lines are accepted unchanged.
+     */
+    void parseReadTableDefinitions() {
+        clearTableMaps();
+        if (tables != null && tables.length == 1 && "".equals(tables[0])) {
+            tables = new String[0];
+        }
+        if (tables == null) {
+            return;
+        }
+        for (String tableDef : tables) {
+            String def = tableDef.trim();
+
+            // 1) split off optional trailing WHERE first, so '=' inside the clause is safe
+            String where = null;
+            Matcher m = TABLE_WHERE_PATTERN.matcher(def);
+            if (m.find()) {
+                where = def.substring(m.end()).trim();
+                def = def.substring(0, m.start()).trim();
+            }
+
+            // 2) split off optional "= columns"
+            String left = def;
+            String columnsPart = null;
+            int eq = def.indexOf('=');
+            if (eq >= 0) {
+                left = def.substring(0, eq).trim();
+                columnsPart = def.substring(eq + 1).trim();
+            }
+
+            // 3) table name and optional alias
+            String tableName = left;
+            String tableAlias = left;
+            int asIdx = indexOfIgnoreCase(left, " as ");
+            if (asIdx >= 0) {
+                tableName = left.substring(0, asIdx).trim();
+                tableAlias = left.substring(asIdx + 4).trim();
+            }
+            if (tableName.isEmpty()) {
+                throw new ConfigurationException("empty table name in tables definition: " + tableDef);
+            }
+            if (tableAlias.isEmpty()) {
+                tableAlias = tableName;
+            }
+
+            // 4) optional columns: lengths ignored, KEY/IGNORE honored
+            List<String> keys = new LinkedList<String>();
+            List<String> ignore = new LinkedList<String>();
+            if (columnsPart != null && !columnsPart.isEmpty()) {
+                for (String columnDef : columnsPart.split(",")) {
+                    String[] parts = columnDef.trim().split(":");
+                    if (parts.length == 0 || parts[0].trim().isEmpty()) {
+                        continue;
+                    }
+                    String columnName = parts[0].trim();
+                    for (int i = 1; i < parts.length; i++) {
+                        String flag = parts[i].trim();
+                        if ("KEY".equalsIgnoreCase(flag)) {
+                            keys.add(columnName);
+                        } else if ("IGNORE".equalsIgnoreCase(flag)) {
+                            ignore.add(columnName);
+                        }
+                        // a numeric length is intentionally ignored in RFC_READ_TABLE mode
+                    }
+                }
+            }
+
+            registerObjectType(tableAlias, tableName);
+            tableKeys.put(tableAlias, keys);
+            tableIgnores.put(tableAlias, ignore);
+            if (where != null && !where.isEmpty()) {
+                tableWhere.put(tableAlias, where);
+            }
+            // tableMetadatas is intentionally left empty in this mode; columns/lengths are read from SAP
+        }
+    }
+
+    private static int indexOfIgnoreCase(String haystack, String needle) {
+        return haystack.toLowerCase().indexOf(needle.toLowerCase());
     }
 
     @Override
@@ -439,7 +619,9 @@ public class SapConfiguration extends AbstractConfiguration {
                 ", tableMetadatas=" + tableMetadatas +
                 ", tableKeys=" + tableKeys +
                 ", tableIgnores=" + tableIgnores +
-                ", tableAliases=" + tableAliases +
+                ", tableNames=" + tableNames +
+                ", tableReadFunction='" + tableReadFunction + '\'' +
+                ", tableWhere=" + tableWhere +
                 ", hideIndirectActivitygroups=" + hideIndirectActivitygroups +
                 ", nonFatalErrorCodes='" + Arrays.toString(nonFatalErrorCodes) +
                 ", pwdChangeErrorIsFatal=" + pwdChangeErrorIsFatal +
@@ -855,6 +1037,16 @@ public class SapConfiguration extends AbstractConfiguration {
         this.subTables = subTables;
     }
 
+    @ConfigurationProperty(order = 40, displayMessageKey = "sap.config.tableReadFunction",
+            helpMessageKey = "sap.config.tableReadFunction.help")
+    public String getTableReadFunction() {
+        return tableReadFunction;
+    }
+
+    public void setTableReadFunction(String tableReadFunction) {
+        this.tableReadFunction = tableReadFunction;
+    }
+
     private String getPlainPassword() {
         final StringBuilder sb = new StringBuilder();
         if (password != null) {
@@ -938,8 +1130,12 @@ public class SapConfiguration extends AbstractConfiguration {
         return tableIgnores;
     }
 
-    public Map<String, String> getTableAliases() {
-        return tableAliases;
+    public Map<String, String> getTableNames() {
+        return tableNames;
+    }
+
+    public Map<String, String> getTableWhere() {
+        return tableWhere;
     }
 
     public Map<String, List<SubTableMetadata>> getSubTablesMetadata() {

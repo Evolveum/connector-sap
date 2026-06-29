@@ -1,0 +1,46 @@
+<!--
+  Copyright (c) 2026 IS4IT
+
+  SAP connector resource TEMPLATE for the Docker test rig.
+
+  PLACEHOLDER template. docker/deploy-connector.sh merges src/test/resources/test.properties
+  into it: every key there (except test.* keys, which are test-harness only) becomes a
+  <cfg:...> configuration property, replacing the config-properties marker below. So the
+  connection and table settings live only in test.properties and are not duplicated here.
+
+  Mapping rules applied by the script:
+    - r3name   -> systemId (the connector's property name)
+    - password -> emitted as a clearValue; midPoint encrypts it on import
+    - a value containing ';' (e.g. tables, tableParameterNames) -> repeated <cfg:...> elements
+    - a generated property overrides a same-named default kept below; extras are appended
+
+  The <cfg:...> entries below are defaults for the test rig; set the same key in
+  test.properties to override any of them.
+
+  Concrete test resources inherit from it via:
+      <super><resourceRef oid="f698ab61-55f4-4eec-bba4-81da4b9f52d8"/></super>
+-->
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3" xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3" xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3" xmlns:org="http://midpoint.evolveum.com/xml/ns/public/common/org-3" xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3" xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3" xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" oid="f698ab61-55f4-4eec-bba4-81da4b9f52d8">
+    <name>SAPUM-J11</name>
+    <lifecycleState>proposed</lifecycleState>
+    <template>true</template>
+    <abstract>true</abstract>
+    <connectorRef type="c:ConnectorType">
+        <filter>
+            <q:text>connectorType = 'com.evolveum.polygon.connector.sap.SapConnector' and available = true</q:text>
+        </filter>
+    </connectorRef>
+    <connectorConfiguration xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3">
+        <icfc:configurationProperties xmlns:cfg="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/com.evolveum.polygon.connector-sap/com.evolveum.polygon.connector.sap.SapConnector">
+            <cfg:useNativeNames>true</cfg:useNativeNames>
+            <cfg:trace>1</cfg:trace>
+            <cfg:traceLevel>6</cfg:traceLevel>
+            <cfg:tracePath>/opt/midpoint/var/log/</cfg:tracePath>
+            <cfg:testBapiFunctionPermission>true</cfg:testBapiFunctionPermission>
+@SAP_CONFIG_PROPERTIES@
+        </icfc:configurationProperties>
+    </connectorConfiguration>
+    <!-- No <schema>/<generationConstraints>: let midPoint generate the full schema so
+         every configured object class (including per-test tables) shows up. -->
+    <capabilities/>
+</resource>

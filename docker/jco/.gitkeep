@@ -1,0 +1,4 @@
+# Place the Linux SAP JCo here for the Docker test rig (see ../README.md):
+#   sapjco3.jar
+#   libsapjco3.so
+# Both are git-ignored.

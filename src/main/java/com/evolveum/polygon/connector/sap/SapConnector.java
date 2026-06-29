@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010-2016 Evolveum
+ * Copyright (c) 2026 IS4IT
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,7 +58,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     private static final String[] BAPI_FUNCTION_LIST = {"BAPI_USER_GETLIST", "BAPI_USER_GET_DETAIL", "BAPI_USER_CREATE1",
             "BAPI_TRANSACTION_COMMIT", "BAPI_TRANSACTION_ROLLBACK", "BAPI_USER_DELETE",
             "BAPI_USER_CHANGE", "BAPI_USER_LOCK", "BAPI_USER_UNLOCK", "BAPI_USER_ACTGROUPS_ASSIGN",
-            "RFC_GET_TABLE_ENTRIES", "SUSR_USER_CHANGE_PASSWORD_RFC", "SUSR_GENERATE_PASSWORD",
+            "SUSR_USER_CHANGE_PASSWORD_RFC", "SUSR_GENERATE_PASSWORD",
             "BAPI_USER_PROFILES_ASSIGN", "BAPI_HELPVALUES_GET",
             "SUSR_LOGIN_CHECK_RFC", "PASSWORD_FORMAL_CHECK",
             "SUSR_GET_ADMIN_USER_LOGIN_INFO", "GET_SYSTEM_TIME_REMOTE"
@@ -158,6 +159,13 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 	private SapFilter baseAccountQuery;
 
     private Transformer xmlTransformer;
+
+    // RFC_READ_TABLE metadata caches, populated lazily and kept for the connector instance's lifetime.
+    // A table's DDIC field layout and key columns do not change while the connector is in use, and the
+    // connector pool is flushed when the configuration/schema changes, so this avoids repeating the
+    // NO_DATA structure read and the DD03L key lookup on every search. Cleared in dispose().
+    private final Map<String, ReadTableStructure> tableStructureCache = new HashMap<>();
+    private final Map<String, List<String>> tableKeyCache = new HashMap<>();
 
     @Override
     public Configuration getConfiguration() {
@@ -271,9 +279,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
     @Override
     public void dispose() {
-        this.configuration = null;
         if ((this.destination != null) && (JCoContext.isStateful(this.destination))) {
-            if (this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
+            if (this.configuration != null && this.configuration.SNC_MODE_ON.equals(this.configuration.getSncMode())) {
                 deleteDestinationDataFile(this.destination.getDestinationName());
             }
             try {
@@ -282,6 +289,9 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 throw new ConnectorIOException(jcoe.getMessage(), jcoe);
             }
         }
+        tableStructureCache.clear();
+        tableKeyCache.clear();
+        this.configuration = null;
     }
 
     @Override
@@ -289,19 +299,75 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         try {
             this.destination.ping();
             if (configuration.getTestBapiFunctionPermission()) {
-                List<String> notFoundFunctions = new LinkedList<String>();
+
+                // (1) Hardcoded list of BAPIs the connector always (potentially) needs. Conditional
+                // skips: _TRANSACTION_ when useTransaction=false, and SUSR_GET_ADMIN_USER_LOGIN_INFO
+                // when alsoReadLoginInfo=false. Everything else stays in the probe because midPoint
+                // can reach any of these code paths during create/update/delete/password.
+                List<String> notFoundFunctions = new LinkedList<>();
                 for (String function : BAPI_FUNCTION_LIST) {
-                    if (!configuration.getUseTransaction() && function.contains("_TRANSACTION_")) {
+                    if (skipFunctionForCurrentConfig(function)) {
                         continue;
                     }
                     JCoFunction jcoFunc = this.destination.getRepository().getFunction(function);
-                    if (jcoFunc == null)
+                    if (jcoFunc == null) {
                         notFoundFunctions.add(function);
+                    }
                 }
-                if (notFoundFunctions.size() > 0) {
+
+                // (2) The actually-configured table-read FM. Replaces the previously hardcoded
+                // RFC_GET_TABLE_ENTRIES check so a resource that opted into RFC_READ_TABLE /
+                // BBP_RFC_READ_TABLE / a custom Z-FM gets its real FM probed, not the legacy one.
+                String tableReadFn = configuration.getTableReadFunction();
+                if (this.destination.getRepository().getFunction(tableReadFn) == null) {
+                    notFoundFunctions.add(tableReadFn + " (configured tableReadFunction)");
+                }
+
+                if (!notFoundFunctions.isEmpty()) {
                     throw new ConfigurationException("these BAPI functions are not accessible: " + notFoundFunctions);
                 }
-                // testing creation of transaction
+
+                // (3) Probe read access to every SAP table the resource will actually touch:
+                // every <cfg:tables> alias, every <cfg:subTables> entry, and - in RFC_READ_TABLE
+                // mode - DD03L (the data dictionary used for column metadata / key discovery).
+                // In RFC_READ_TABLE mode the per-table WHERE clause is applied so syntax / unknown
+                // column / S_TABU_DIS errors all surface at test time; a WHERE that legitimately
+                // matches zero rows does NOT fail the probe (SAP returns normally with empty
+                // data). Permission failures aggregate into one ConfigurationException listing
+                // each unreachable table, so a misconfigured resource produces one clear report
+                // rather than failing one search at a time at runtime.
+                List<String> notReadableTables = new LinkedList<>();
+                if (configuration.isReadTableMode()) {
+                    probeTableReadAccessInto(notReadableTables, "DD03L",
+                            "DDIC dictionary, used for schema discovery and key detection", null);
+                }
+                Map<String, String> tableWhereByAlias = configuration.getTableWhere();
+                for (Map.Entry<String, String> entry : configuration.getTableNames().entrySet()) {
+                    String alias = entry.getKey();
+                    probeTableReadAccessInto(notReadableTables, entry.getValue(),
+                            "table alias '" + alias + "'",
+                            tableWhereByAlias.get(alias));
+                }
+                for (Map.Entry<String, List<SubTableMetadata>> aliasEntry
+                        : configuration.getSubTablesMetadata().entrySet()) {
+                    for (SubTableMetadata sub : aliasEntry.getValue()) {
+                        // A sub-table WHERE that references root-row fields (<rootAlias>.<field>)
+                        // can only be resolved per-row at runtime; we have no root row here, so
+                        // probe without the WHERE in that case - existence + read auth still get
+                        // checked, only the WHERE syntax/columns don't.
+                        String subWhere = sub.getRootFieldReferences().isEmpty() ? sub.getWhere() : null;
+                        probeTableReadAccessInto(notReadableTables, sub.getTableName(),
+                                "sub-table of alias '" + aliasEntry.getKey() + "'",
+                                subWhere);
+                    }
+                }
+                if (!notReadableTables.isEmpty()) {
+                    throw new ConfigurationException(
+                            "these SAP tables are not readable by the connector user: "
+                                    + notReadableTables);
+                }
+
+                // (4) Existing transaction-context smoke test.
                 if (configuration.getUseTransaction()) {
                     JCoContext.begin(destination);
                     JCoContext.end(destination);
@@ -312,13 +378,73 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         }
     }
 
+    /**
+     * Returns {@code true} when {@code function} can be skipped in the {@link #test()} probe
+     * because the surrounding feature is turned off in the configuration. Keeps test() readable
+     * and makes new conditional skips easy to add.
+     */
+    private boolean skipFunctionForCurrentConfig(String function) {
+        if (!configuration.getUseTransaction() && function.contains("_TRANSACTION_")) {
+            return true;
+        }
+        if (!configuration.getAlsoReadLoginInfo() && "SUSR_GET_ADMIN_USER_LOGIN_INFO".equals(function)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Probes read access to {@code tableName} using the active table-read path. In
+     * {@code RFC_READ_TABLE} mode does a server-side capped one-row read ({@code ROWCOUNT=1},
+     * {@code USE_ET_DATA_4_RETURN=X} when supported) with the optional per-table {@code whereClause}
+     * applied as {@code OPTIONS}; this catches WHERE-syntax errors ({@code OPTION_NOT_VALID}),
+     * unknown columns in the WHERE ({@code FIELD_NOT_VALID}), and table-level
+     * S_TABU_DIS / NOT_AUTHORIZED failures, while a WHERE that legitimately matches zero rows
+     * still succeeds (SAP returns normally with no data, no exception). In the legacy
+     * {@code RFC_GET_TABLE_ENTRIES} path WHERE/OPTIONS is not supported by the FM, so the probe
+     * is a {@code MAX_ENTRIES=1} call and {@code whereClause} is ignored. Adds a human-readable
+     * entry to {@code failures} on error; the test() driver aggregates them.
+     */
+    private void probeTableReadAccessInto(List<String> failures, String tableName, String role,
+            String whereClause) {
+        try {
+            if (configuration.isReadTableMode()) {
+                JCoFunction function = getReadTableFunction();
+                JCoParameterList imports = function.getImportParameterList();
+                imports.setValue("QUERY_TABLE", tableName);
+                imports.setValue("ROWCOUNT", 1);
+                if (imports.getListMetaData().hasField("USE_ET_DATA_4_RETURN")) {
+                    // Avoid DATA_BUFFER_EXCEEDED on wide tables - their row image would otherwise
+                    // overflow the legacy DATA work area at 512 bytes.
+                    imports.setValue("USE_ET_DATA_4_RETURN", "X");
+                }
+                setOptions(function, whereClause);
+                function.execute(destination);
+            } else {
+                JCoFunction function = destination.getRepository().getFunction(SapConfiguration.FN_GET_TABLE_ENTRIES);
+                if (function == null) {
+                    throw new RuntimeException(SapConfiguration.FN_GET_TABLE_ENTRIES + " not found");
+                }
+                function.getImportParameterList().setValue("TABLE_NAME", tableName);
+                function.getImportParameterList().setValue("MAX_ENTRIES", 1);
+                function.execute(destination);
+            }
+        } catch (Exception e) {
+            failures.add(tableName + " (" + role + "): " + e.getMessage());
+        }
+    }
+
     @Override
     public Schema schema() {
         SchemaBuilder builder = new SchemaBuilder(SapConnector.class);
 
         buildAccountObjectClass(builder);
 
-        buildTableObjectClasses(builder);
+        if (configuration.isReadTableMode()) {
+            buildReadTableObjectClasses(builder);
+        } else {
+            buildTableObjectClasses(builder);
+        }
 
         buildProfileObjectClass(builder);
 
@@ -389,11 +515,12 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
     private void buildTableObjectClasses(SchemaBuilder builder) {
         for (Map.Entry<String, Map<String, Integer>> table : configuration.getTableMetadatas().entrySet()) {
-            String tableName = table.getKey();
+            String alias = table.getKey();
+            String tableName = configuration.getTableNames().get(alias);
             Map<String, Integer> columnsMetadata = table.getValue();
 
             ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
-            objClassBuilder.setType(configuration.getTableAliases().get(tableName));
+            objClassBuilder.setType(alias);
 
             for (Map.Entry<String, Integer> column : columnsMetadata.entrySet()) {
                 String columnName = column.getKey();
@@ -403,7 +530,45 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
             }
 
-            List<SubTableMetadata> subTables = configuration.getSubTablesMetadata().get(tableName);
+            List<SubTableMetadata> subTables = configuration.getSubTablesMetadata().get(alias);
+            if (subTables != null) {
+                for (SubTableMetadata subTable : subTables) {
+                    AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(subTable.getVirtualColumnName());
+                    attributeInfoBuilder.setCreateable(false);
+                    attributeInfoBuilder.setUpdateable(false);
+                    attributeInfoBuilder.setMultiValued(true);
+                    objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
+                }
+            }
+
+            builder.defineObjectClass(objClassBuilder.build());
+        }
+    }
+
+    private void buildReadTableObjectClasses(SchemaBuilder builder) {
+        for (String alias : configuration.getTableNames().keySet()) {
+            String tableName = configuration.getTableNames().get(alias);
+            ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
+            objClassBuilder.setType(alias);
+
+            List<String> ignores = configuration.getTableIgnores().getOrDefault(alias, Collections.emptyList());
+            try {
+                ReadTableStructure structure = loadTableStructure(tableName);
+                for (ReadTableStructure.Field field : structure.getFields()) {
+                    if ("MANDT".equals(field.getName()) || ignores.contains(field.getName())) {
+                        continue;
+                    }
+                    AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(field.getName());
+                    attributeInfoBuilder.setCreateable(false);
+                    attributeInfoBuilder.setUpdateable(false);
+                    objClassBuilder.addAttributeInfo(attributeInfoBuilder.build());
+                }
+            } catch (JCoException e) {
+                throw new ConnectorIOException("Error reading structure of table " + tableName + " via "
+                        + configuration.getTableReadFunction() + ": " + e.getMessage(), e);
+            }
+
+            List<SubTableMetadata> subTables = configuration.getSubTablesMetadata().get(alias);
             if (subTables != null) {
                 for (SubTableMetadata subTable : subTables) {
                     AttributeInfoBuilder attributeInfoBuilder = new AttributeInfoBuilder(subTable.getVirtualColumnName());
@@ -542,18 +707,21 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
         } else {
             String found = null;
-            for (String tableName : configuration.getTableAliases().keySet()) {
-                String tableAlias = configuration.getTableAliases().get(tableName);
-                if (objectClass.is(tableAlias)) {
-                    found = tableName;
+            for (String alias : configuration.getTableNames().keySet()) {
+                if (objectClass.is(alias)) {
+                    found = alias;
                 }
             }
 
             if (found == null) {
-                throw new UnsupportedOperationException("Unsupported object class " + objectClass + ", expected: " + configuration.getTableMetadatas());
+                throw new UnsupportedOperationException("Unsupported object class " + objectClass + ", expected one of: " + configuration.getTableNames().keySet());
             }
 
-            executeTableQuery(found, query, handler);
+            if (configuration.isReadTableMode()) {
+                executeReadTableQuery(found, query, handler);
+            } else {
+                executeTableQuery(found, query, handler);
+            }
         }
 
     }
@@ -605,7 +773,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         }
     }
 
-    private void executeTableQuery(String tableName, SapFilter query, ResultsHandler handler) {
+    private void executeTableQuery(String alias, SapFilter query, ResultsHandler handler) {
+        String tableName = configuration.getTableNames().get(alias);
         int numRows = 0;
         boolean isFindByKey = query != null && query.getBasicByNameEquals() != null;
 
@@ -645,7 +814,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
                     Map<String, String> rootValues = new LinkedHashMap<>();
 
-                    for (Map.Entry<String, Integer> entry : configuration.getTableMetadatas().get(tableName).entrySet()) {
+                    for (Map.Entry<String, Integer> entry : configuration.getTableMetadatas().get(alias).entrySet()) {
                         String column = entry.getKey();
                         Integer length = entry.getValue();
 
@@ -655,10 +824,10 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                         rootValues.put(column, columnValue);
 
                         // ignore columns, what is selected as :IGNORE
-                        if (!configuration.getTableIgnores().get(tableName).contains(column)) {
+                        if (!configuration.getTableIgnores().get(alias).contains(column)) {
                             addAttr(builder, column, columnValue);
                         }
-                        if (configuration.getTableKeys().get(tableName).contains(column)) {
+                        if (configuration.getTableKeys().get(alias).contains(column)) {
                             keys.add(columnValue);
                         }
 
@@ -685,7 +854,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                     builder.setUid(concatenatedKey.toString());
                     builder.setName(concatenatedKey.toString());
 
-                    ObjectClass objectClass = new ObjectClass(configuration.getTableAliases().get(tableName));
+                    ObjectClass objectClass = new ObjectClass(alias);
                     builder.setObjectClass(objectClass);
 
                     if (query != null &&
@@ -695,8 +864,8 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                         continue;
                     }
 
-                    if (configuration.getSubTablesMetadata().containsKey(tableName)) {
-                        for (SubTableMetadata subTables : configuration.getSubTablesMetadata().get(tableName)) {
+                    if (configuration.getSubTablesMetadata().containsKey(alias)) {
+                        for (SubTableMetadata subTables : configuration.getSubTablesMetadata().get(alias)) {
                             try {
                                 builder.addAttribute(subTables.getVirtualColumnName(),
                                                      executeTableSubQuery(concatenatedKey.toString(), subTables,
@@ -730,6 +899,427 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                 return;
             throw new ConnectorIOException(e.getMessage(), e);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // RFC_READ_TABLE / BBP_RFC_READ_TABLE code path (configuration.tableReadFunction != RFC_GET_TABLE_ENTRIES)
+    // ---------------------------------------------------------------------------------------------
+
+    private void executeReadTableQuery(String alias, SapFilter query, ResultsHandler handler) {
+        String tableName = configuration.getTableNames().get(alias);
+        boolean isFindByKey = query != null && query.getBasicByNameEquals() != null;
+        try {
+            List<String> keyColumns = resolveKeyColumns(alias);
+            ReadTableStructure structure = loadTableStructure(tableName);
+            List<String> ignores = configuration.getTableIgnores().getOrDefault(alias, Collections.emptyList());
+
+            // output = all columns except MANDT and :IGNORE columns, plus the key columns
+            List<String> outputFields = new ArrayList<>();
+            for (ReadTableStructure.Field field : structure.getFields()) {
+                String name = field.getName();
+                if ("MANDT".equals(name) || ignores.contains(name)) {
+                    continue;
+                }
+                outputFields.add(name);
+            }
+            for (String key : keyColumns) {
+                if (!outputFields.contains(key)) {
+                    outputFields.add(key);
+                }
+            }
+
+            // sub-tables join on their MATCH columns and on any <rootAlias>.<field> WHERE references, so
+            // make sure those root fields are fetched on the root row
+            List<SubTableMetadata> subTables = configuration.getSubTablesMetadata().getOrDefault(alias, Collections.emptyList());
+            for (SubTableMetadata subTable : subTables) {
+                for (TableColumnDefinition column : subTable.getColumns()) {
+                    if (column.getMode() == TableColumnDefinition.Mode.MATCH && !outputFields.contains(column.getColumnName())) {
+                        outputFields.add(column.getColumnName());
+                    }
+                }
+                for (String rootField : subTable.getRootFieldReferences()) {
+                    if (!outputFields.contains(rootField)) {
+                        outputFields.add(rootField);
+                    }
+                }
+            }
+
+            String where = buildWhere(alias, keyColumns, query);
+            List<Map<String, String>> rows = readTableData(tableName, outputFields, where);
+
+            ObjectClass objectClass = new ObjectClass(alias);
+            boolean shouldContinue = true;
+            int handledObjects = 0;
+            for (Map<String, String> row : rows) {
+                if (!shouldContinue) {
+                    break;
+                }
+
+                StringBuilder concatenatedKey = new StringBuilder();
+                for (String key : keyColumns) {
+                    if (concatenatedKey.length() != 0) {
+                        concatenatedKey.append(":");
+                    }
+                    concatenatedKey.append(row.getOrDefault(key, ""));
+                }
+                if (StringUtil.isEmpty(concatenatedKey.toString())) {
+                    LOG.warn("ignoring empty key for table {0}", tableName);
+                    continue;
+                }
+                // RFC_READ_TABLE filters exactly, but for composite keys we only filter server-side on a
+                // single key column, so re-check the concatenated key here as well.
+                if (isFindByKey && !concatenatedKey.toString().equalsIgnoreCase(query.getBasicByNameEquals())) {
+                    continue;
+                }
+
+                ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
+                builder.setObjectClass(objectClass);
+                builder.setUid(concatenatedKey.toString());
+                builder.setName(concatenatedKey.toString());
+                for (Map.Entry<String, String> entry : row.entrySet()) {
+                    // columns fetched only for a sub-table join (a MATCH column or a <rootAlias>.<field>
+                    // WHERE reference) may be marked :IGNORE; they must not be emitted as attributes -
+                    // they are deliberately not part of the schema either.
+                    if (ignores.contains(entry.getKey())) {
+                        continue;
+                    }
+                    addAttr(builder, entry.getKey(), entry.getValue());
+                }
+
+                if (query != null && query.getInMemoryFilter() != null
+                        && !query.getInMemoryFilter().accept(builder.build())) {
+                    continue;
+                }
+
+                for (SubTableMetadata subTable : subTables) {
+                    try {
+                        builder.addAttribute(subTable.getVirtualColumnName(), executeReadTableSubQuery(subTable, row));
+                    } catch (JCoException e) {
+                        if ("TABLE_EMPTY".equals(e.getKey())) {
+                            builder.addAttribute(subTable.getVirtualColumnName(), new ArrayList<>());
+                        } else {
+                            throw new ConnectorIOException(
+                                    "Error during sub-table query for " + subTable.getTableName() + ": " + e.getMessage(), e);
+                        }
+                    }
+                }
+
+                ConnectorObject build = builder.build();
+                LOG.ok("ConnectorObject: {0}", build);
+                shouldContinue = handler.handle(build);
+                handledObjects++;
+            }
+            LOG.ok("Finished reading {0} objects of {1} query results", handledObjects, rows.size());
+        } catch (JCoException e) {
+            if ("TABLE_EMPTY".equals(e.getKey())) {
+                return;
+            }
+            throw new ConnectorIOException(e.getMessage(), e);
+        }
+    }
+
+    private JCoFunction getReadTableFunction() throws JCoException {
+        String functionName = configuration.getTableReadFunction();
+        JCoFunction function = destination.getRepository().getFunction(functionName);
+        if (function == null) {
+            throw new RuntimeException(functionName + " not found in SAP.");
+        }
+        return function;
+    }
+
+    /** Reads the field layout of a table (all columns) without fetching any data (NO_DATA); cached per instance. */
+    private ReadTableStructure loadTableStructure(String tableName) throws JCoException {
+        ReadTableStructure cached = tableStructureCache.get(tableName);
+        if (cached != null) {
+            return cached;
+        }
+        JCoFunction function = getReadTableFunction();
+        function.getImportParameterList().setValue("QUERY_TABLE", tableName);
+        function.getImportParameterList().setValue("NO_DATA", "X");
+        function.execute(destination);
+        ReadTableStructure structure = new ReadTableStructure(function.getTableParameterList().getTable("FIELDS"));
+        tableStructureCache.put(tableName, structure);
+        return structure;
+    }
+
+    /**
+     * Reads {@code outputFields} of {@code tableName}, optionally filtered by {@code whereClause}.
+     * Prefers the unlimited ET_DATA output and server-side sort when the system supports them, and
+     * falls back to the fixed-width DATA work area otherwise. Returns one column-&gt;value map per row.
+     */
+    private List<Map<String, String>> readTableData(String tableName, List<String> outputFields, String whereClause) throws JCoException {
+        JCoFunction function = getReadTableFunction();
+        JCoParameterList imports = function.getImportParameterList();
+        imports.setValue("QUERY_TABLE", tableName);
+
+        if (imports.getListMetaData().hasField("USE_ET_DATA_4_RETURN")) {
+            imports.setValue("USE_ET_DATA_4_RETURN", "X");
+        }
+        if (imports.getListMetaData().hasField("GET_SORTED")) {
+            imports.setValue("GET_SORTED", "X");
+        }
+
+        setOptions(function, whereClause);
+
+        JCoTable fieldsIn = function.getTableParameterList().getTable("FIELDS");
+        if (outputFields != null) {
+            for (String field : outputFields) {
+                fieldsIn.appendRow();
+                fieldsIn.setValue("FIELDNAME", field);
+            }
+        }
+
+        function.execute(destination);
+
+        ReadTableStructure structure = new ReadTableStructure(function.getTableParameterList().getTable("FIELDS"));
+
+        boolean useEtData = function.getExportParameterList() != null
+                && function.getExportParameterList().getListMetaData().hasField("ET_DATA");
+        JCoTable data = useEtData
+                ? function.getExportParameterList().getTable("ET_DATA")
+                : function.getTableParameterList().getTable("DATA");
+
+        List<Map<String, String>> rows = new ArrayList<>();
+        if (data.getNumRows() > 0) {
+            data.firstRow();
+            do {
+                Map<String, String> row = new LinkedHashMap<>();
+                if (useEtData) {
+                    // ET_DATA: one record per row in field LINE, columns separated by 0x1E (record separator)
+                    String raw = data.getString("LINE");
+                    String[] values = raw.split("\\x1E", -1);
+                    List<ReadTableStructure.Field> fields = structure.getFields();
+                    for (int i = 0; i < fields.size(); i++) {
+                        row.put(fields.get(i).getName(), i < values.length ? values[i].trim() : "");
+                    }
+                } else {
+                    // legacy DATA: fixed-width image in field WA, sliced by the returned FIELDS offset/length
+                    String raw = data.getString("WA");
+                    for (ReadTableStructure.Field field : structure.getFields()) {
+                        int start = Math.min(field.getOffset(), raw.length());
+                        int end = Math.min(field.getOffset() + field.getLength(), raw.length());
+                        row.put(field.getName(), raw.substring(start, end).trim());
+                    }
+                }
+                rows.add(row);
+            } while (data.nextRow());
+        }
+        return rows;
+    }
+
+    private void setOptions(JCoFunction function, String whereClause) {
+        if (StringUtil.isBlank(whereClause)) {
+            return;
+        }
+        JCoTable options = function.getTableParameterList().getTable("OPTIONS");
+        // OPTIONS.TEXT is CHAR72. Two stages, to stay close to the long-proven behaviour:
+        //   1) break at AND/OR boundaries (AND/OR must be upper case), as before - each logical
+        //      sub-expression keeps its own row, which is what worked reliably in practice;
+        //   2) only a segment that is STILL longer than 72 characters is hard-wrapped, splitting on
+        //      whitespace OUTSIDE quoted literals so no field name, operator or (possibly space-
+        //      containing) quoted value is cut across a row boundary.
+        for (String segment : whereClause.replaceAll("[\\r\\n]+", " ").split("(?<=\\s(AND|OR)\\s)")) {
+            if (segment.trim().isEmpty()) {
+                continue;
+            }
+            if (segment.length() <= 72) {
+                options.appendRow();
+                options.setValue("TEXT", segment);
+            } else {
+                appendWrapped(options, segment);
+            }
+        }
+    }
+
+    /**
+     * Appends {@code text} onto one or more &lt;=72-character OPTIONS rows, splitting only on whitespace
+     * that is OUTSIDE single-quoted literals (via {@link #splitOutsideQuotes}) so no token or
+     * space-containing quoted value is cut across a row boundary. A single token longer than 72
+     * characters cannot be represented and is emitted on its own row (SAP then reports the error).
+     */
+    private void appendWrapped(JCoTable options, String text) {
+        StringBuilder line = new StringBuilder();
+        for (String token : splitOutsideQuotes(text)) {
+            if (line.length() == 0) {
+                line.append(token);
+            } else if (line.length() + 1 + token.length() <= 72) {
+                line.append(' ').append(token);
+            } else {
+                options.appendRow();
+                options.setValue("TEXT", line.toString());
+                line.setLength(0);
+                line.append(token);
+            }
+        }
+        if (line.length() > 0) {
+            options.appendRow();
+            options.setValue("TEXT", line.toString());
+        }
+    }
+
+    /**
+     * Splits {@code where} on whitespace, but treats text inside single quotes as opaque so a quoted
+     * value containing spaces (or an SQL {@code ''} escape) stays in one token. Used to wrap the WHERE
+     * into the 72-character OPTIONS rows without ever cutting a token in half.
+     */
+    private static List<String> splitOutsideQuotes(String where) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuote = false;
+        for (int i = 0; i < where.length(); i++) {
+            char c = where.charAt(i);
+            if (c == '\'') {
+                inQuote = !inQuote; // an '' escape toggles twice -> net inside, which is correct
+                current.append(c);
+            } else if (Character.isWhitespace(c) && !inQuote) {
+                if (current.length() > 0) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(c);
+            }
+        }
+        if (current.length() > 0) {
+            tokens.add(current.toString());
+        }
+        return tokens;
+    }
+
+    private String buildWhere(String alias, List<String> keyColumns, SapFilter query) {
+        String configWhere = configuration.getTableWhere().get(alias);
+        String filterWhere = null;
+        if (query != null && query.getBasicByNameEquals() != null && keyColumns.size() == 1) {
+            filterWhere = keyColumns.get(0) + " = '" + query.getBasicByNameEquals().replace("'", "''") + "'";
+        }
+        if (StringUtil.isBlank(configWhere)) {
+            return filterWhere;
+        }
+        if (filterWhere == null) {
+            return configWhere;
+        }
+        return "( " + configWhere + " ) AND ( " + filterWhere + " )";
+    }
+
+    /** Key columns: a {@code :KEY} override from the configuration, else the DDIC primary key (MANDT dropped). Cached per instance. */
+    private List<String> resolveKeyColumns(String alias) throws JCoException {
+        List<String> cached = tableKeyCache.get(alias);
+        if (cached != null) {
+            return cached;
+        }
+        List<String> override = configuration.getTableKeys().get(alias);
+        if (override != null && !override.isEmpty()) {
+            tableKeyCache.put(alias, override);
+            return override;
+        }
+        String tableName = configuration.getTableNames().get(alias);
+        List<String> ddicKeys = readDdicKeys(tableName);
+        if (ddicKeys.isEmpty()) {
+            throw new ConfigurationException("Cannot determine key columns for table " + tableName
+                    + " from DDIC (DD03L). Please mark a key column with :KEY in the 'tables' configuration.");
+        }
+        tableKeyCache.put(alias, ddicKeys);
+        return ddicKeys;
+    }
+
+    private List<String> readDdicKeys(String tableName) throws JCoException {
+        String where = "TABNAME = '" + tableName + "' AND KEYFLAG = 'X' AND AS4LOCAL = 'A'";
+        List<Map<String, String>> rows = readTableData("DD03L", Arrays.asList("FIELDNAME", "POSITION"), where);
+        rows.sort(Comparator.comparingInt(r -> parseIntSafe(r.get("POSITION"))));
+        List<String> keys = new ArrayList<>();
+        for (Map<String, String> row : rows) {
+            String fieldName = row.get("FIELDNAME");
+            if (fieldName == null || fieldName.isEmpty() || "MANDT".equals(fieldName)) {
+                continue;
+            }
+            if (!keys.contains(fieldName)) {
+                keys.add(fieldName);
+            }
+        }
+        return keys;
+    }
+
+    private static int parseIntSafe(String value) {
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (Exception e) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    /**
+     * RFC_READ_TABLE sub-query: for a single root row, fetch the related rows of {@code metadata.getTableName()}.
+     * MATCH columns become a WHERE join on the root row's value, ("value") filter constants and the optional
+     * trailing WHERE are ANDed on, and the OUTPUT columns are read back and formatted (XML/TSV) - one value per row.
+     */
+    private List<String> executeReadTableSubQuery(SubTableMetadata metadata, Map<String, String> rootValues) throws JCoException {
+        List<String> conditions = new ArrayList<>();
+        List<String> outputFields = new ArrayList<>();
+        for (TableColumnDefinition column : metadata.getColumns()) {
+            if (column.getMode() == TableColumnDefinition.Mode.MATCH) {
+                conditions.add(equalsCondition(column.getColumnName(), rootValues.getOrDefault(column.getColumnName(), "")));
+            } else if (column.getMode() == TableColumnDefinition.Mode.OUTPUT) {
+                outputFields.add(column.getColumnName());
+            }
+            if (column.getFilterConstant() != null) {
+                conditions.add(equalsCondition(column.getColumnName(), column.getFilterConstant()));
+            }
+        }
+        String resolvedWhere = metadata.resolveWhere(rootValues);
+        if (!StringUtil.isBlank(resolvedWhere)) {
+            conditions.add("( " + resolvedWhere + " )");
+        }
+        String where = String.join(" AND ", conditions);
+
+        List<Map<String, String>> rows = readTableData(metadata.getTableName(), outputFields, where);
+
+        List<String> values = new ArrayList<>();
+        for (Map<String, String> row : rows) {
+            Map<String, String> outputs = new LinkedHashMap<>();
+            for (TableColumnDefinition column : metadata.getColumns()) {
+                if (column.getMode() == TableColumnDefinition.Mode.OUTPUT) {
+                    outputs.put(column.getColumnName(), row.getOrDefault(column.getColumnName(), ""));
+                }
+            }
+            values.add(formatSubRow(metadata.getFormat(), outputs));
+        }
+        return values;
+    }
+
+    private static String equalsCondition(String column, String value) {
+        return column + " = '" + value.replace("'", "''") + "'";
+    }
+
+    /** Formats one sub-table result row (its OUTPUT columns, in config order) as XML or TSV. */
+    private String formatSubRow(SubTableMetadata.Format format, Map<String, String> outputs) {
+        if (format == SubTableMetadata.Format.XML) {
+            try (StringWriter writer = new StringWriter()) {
+                if (xmlTransformer == null) {
+                    xmlTransformer = TransformerFactory.newInstance().newTransformer();
+                }
+                Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
+                Element root = document.createElement("item");
+                document.appendChild(root);
+                for (Map.Entry<String, String> entry : outputs.entrySet()) {
+                    Element item = document.createElement(entry.getKey());
+                    item.appendChild(document.createTextNode(entry.getValue()));
+                    root.appendChild(item);
+                }
+                xmlTransformer.transform(new DOMSource(document), new StreamResult(writer));
+                return writer.toString();
+            } catch (TransformerException | ParserConfigurationException | IOException e) {
+                throw new ConnectorIOException("Could not format row as XML: " + e.getMessage(), e);
+            }
+        }
+        // TSV
+        StringBuilder row = new StringBuilder();
+        for (String value : outputs.values()) {
+            if (row.length() != 0) {
+                row.append("\t");
+            }
+            row.append(value);
+        }
+        return row.toString();
     }
 
     private List<String> executeTableSubQuery(String queryKey, SubTableMetadata metadata, Map<String, String> rootValues) throws JCoException {
@@ -787,37 +1377,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
                     continue;
                 }
 
-                if (metadata.getFormat() == SubTableMetadata.Format.XML) {
-                    try (StringWriter writer = new StringWriter()) {
-                        if (xmlTransformer == null) {
-                            xmlTransformer = TransformerFactory.newInstance().newTransformer();
-                        }
-
-                        Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
-                        Element root = document.createElement("item");
-                        document.appendChild(root);
-
-                        for (Map.Entry<String, String> entry : columnValues.entrySet()) {
-                            Element item = document.createElement(entry.getKey());
-                            item.appendChild(document.createTextNode(entry.getValue()));
-                            root.appendChild(item);
-                        }
-                        xmlTransformer.transform(new DOMSource(document), new StreamResult(writer));
-                        values.add(writer.toString());
-                    } catch (TransformerException | ParserConfigurationException | IOException e) {
-                        throw new ConnectorIOException("Could not format row as XML: " + e.getMessage(), e);
-                    }
-
-                } else if (metadata.getFormat() == SubTableMetadata.Format.TSV) {
-                    StringBuilder row = new StringBuilder();
-                    for (Map.Entry<String, String> entry : columnValues.entrySet()) {
-                        if (!row.isEmpty()) {
-                            row.append("\t");
-                        }
-                        row.append(entry.getValue());
-                    }
-                    values.add(row.toString());
-                }
+                values.add(formatSubRow(metadata.getFormat(), columnValues));
 
             } while (entries.nextRow());
         }

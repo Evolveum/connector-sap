@@ -1,0 +1,113 @@
+# Copyright (c) 2026 IS4IT
+#
+# Test rig for the SAP ConnId connector inside a real midPoint server.
+#
+# Adapted from ../midpoint-lcm/docker/docker-compose.yml (itself from
+# Evolveum/midpoint-docker). Differences for this connector:
+#   - versions and the GUI host port are pinned in .env:
+#       MP_VER   midPoint image tag
+#       PG_VER   PostgreSQL major version (the lcm rig hard-coded 16; here 17)
+#       MP_PORT  host port for the GUI (container is always 8080)
+#   - the SAP connector bundle is deployed into $MIDPOINT_HOME/icf-connectors/
+#     and SAP JCo into $MIDPOINT_HOME/lib/ by docker/deploy-connector.sh
+#   - LD_LIBRARY_PATH points at $MIDPOINT_HOME/lib so JCo finds libsapjco3.so
+#   - the GUI is on host port MP_PORT (default 11080) and PostgreSQL is NOT
+#     published on the host, to avoid clashing with other test rigs
+#
+# Usage (from project root):
+#   docker compose -f docker/docker-compose.yml up -d        # first start
+#   docker/deploy-connector.sh                               # mvn package + deploy connector(+JCo) + restart
+#   # GUI:  http://localhost:11080/midpoint   (administrator / T3stPw890uio)
+#   # Logs: docker compose -f docker/docker-compose.yml logs -f mp_server
+#   # DB:   docker compose -f docker/docker-compose.yml exec mp_data psql -U midpoint
+#   docker compose -f docker/docker-compose.yml down -v      # tear down (-v wipes volumes)
+#
+# SAP connectivity needs the Linux SAP JCo (sapjco3.jar + libsapjco3.so) placed in
+# docker/jco/ - see docker/README.md. Without it midPoint starts but the SAP
+# connector cannot be instantiated.
+
+# Pin the Compose project name so containers, volumes and the network are always
+# prefixed connector_sap_* regardless of the directory the file is invoked from.
+name: connector_sap
+
+services:
+
+  mp_data:
+    image: postgres:${PG_VER:-17}-alpine
+    environment:
+      - POSTGRES_PASSWORD=db.secret.pw.007
+      - POSTGRES_USER=midpoint
+      - POSTGRES_INITDB_ARGS=--lc-collate=en_US.utf8 --lc-ctype=en_US.utf8
+    networks: [net]
+    volumes:
+      - mp_data:/var/lib/postgresql/data
+    # PostgreSQL is intentionally not published on the host (use `compose exec
+    # mp_data psql ...` for inspection) so concurrent test rigs don't clash.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U midpoint"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  data_init:
+    image: evolveum/midpoint:${MP_VER:-4.10.3}
+    command: >
+      bash -c "
+      cd /opt/midpoint ;
+      bin/midpoint.sh init-native ;
+      echo ' - - - - - - ' ;
+      bin/ninja.sh -B info >/dev/null 2>/tmp/ninja.log ;
+      grep -q \"ERROR\" /tmp/ninja.log && (
+      bin/ninja.sh run-sql --create --mode REPOSITORY  ;
+      bin/ninja.sh run-sql --create --mode AUDIT
+      ) ||
+      echo -e '\\n Repository init is not needed...' ;
+      "
+    depends_on:
+      mp_data:
+        condition: service_healthy
+    environment:
+      - MP_SET_midpoint_repository_jdbcUsername=midpoint
+      - MP_SET_midpoint_repository_jdbcPassword=db.secret.pw.007
+      - MP_SET_midpoint_repository_jdbcUrl=jdbc:postgresql://mp_data:5432/midpoint
+      - MP_SET_midpoint_repository_database=postgresql
+      - MP_INIT_CFG=/opt/midpoint/var
+    networks: [net]
+    volumes:
+      - mp_home:/opt/midpoint/var
+
+  mp_server:
+    image: evolveum/midpoint:${MP_VER:-4.10.3}
+    depends_on:
+      data_init:
+        condition: service_completed_successfully
+      mp_data:
+        condition: service_healthy
+    command: ["/opt/midpoint/bin/midpoint.sh", "container"]
+    ports:
+      - "${MP_PORT:-11080}:8080"
+    environment:
+      - MP_SET_midpoint_administrator_initialPassword=T3stPw890uio
+      - MP_SET_midpoint_repository_jdbcUsername=midpoint
+      - MP_SET_midpoint_repository_jdbcPassword=db.secret.pw.007
+      - MP_SET_midpoint_repository_jdbcUrl=jdbc:postgresql://mp_data:5432/midpoint
+      - MP_SET_midpoint_repository_database=postgresql
+      - MP_UNSET_midpoint_repository_hibernateHbm2ddl=1
+      - MP_NO_ENV_COMPAT=1
+      # so SAP JCo can load its native library (libsapjco3.so) from $MIDPOINT_HOME/lib
+      - LD_LIBRARY_PATH=/opt/midpoint/var/lib
+    networks: [net]
+    volumes:
+      - mp_home:/opt/midpoint/var
+      # The connector bundle and JCo are NOT bind-mounted: single-file / sub-dir
+      # bind mounts on Colima / Docker Desktop on macOS are unreliable. Instead
+      # docker/deploy-connector.sh copies them into the running container and
+      # restarts mp_server. See docker/README.md.
+
+networks:
+  net:
+    driver: bridge
+
+volumes:
+  mp_data:
+  mp_home:
