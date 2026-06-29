@@ -585,19 +585,31 @@ public class TestClient {
     @Test(dependsOnMethods = {"testCreateFull"})
     public void testSync() throws IOException {
         SyncToken syncToken = sapConnector.getLatestSyncToken(ACCOUNT_OBJECT_CLASS);
-        testEnableUser();
+        // no sleep needed: getLatestSyncToken returns one second before the server time, so a change made
+        // right now (in the same second) is still strictly after the token
+        // a guaranteed user-master (USR02) change so LASTMODIFIED advances; an address-only change does
+        // not necessarily bump it, so change the valid-to (logon) date instead
+        Calendar validTo = new GregorianCalendar();
+        validTo.add(Calendar.DAY_OF_YEAR, 30);
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        attributes.add(AttributeBuilder.build(Name.NAME, USER_NAME));
+        attributes.add(AttributeBuilder.build(OperationalAttributes.DISABLE_DATE_NAME, validTo.getTime().getTime()));
+        sapConnector.update(ACCOUNT_OBJECT_CLASS, new Uid(USER_NAME), attributes, null);
+
         final boolean[] changeDetected = {false};
         SyncResultsHandler syncResultsHandler = new SyncResultsHandler() {
             @Override
             public boolean handle(SyncDelta syncDelta) {
                 System.out.println("syncDelta = " + syncDelta);
-                changeDetected[0] = true;
+                if (USER_NAME.equalsIgnoreCase(syncDelta.getUid().getUidValue())) {
+                    changeDetected[0] = true;
+                }
                 return true;
             }
         };
         sapConnector.sync(ACCOUNT_OBJECT_CLASS, syncToken, syncResultsHandler, null);
 
-        Assert.assertEquals(changeDetected[0], true);
+        Assert.assertTrue(changeDetected[0], "sync did not report the just-modified test user " + USER_NAME);
     }
 
     @Test

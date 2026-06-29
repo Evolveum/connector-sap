@@ -60,7 +60,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             "RFC_GET_TABLE_ENTRIES", "SUSR_USER_CHANGE_PASSWORD_RFC", "SUSR_GENERATE_PASSWORD",
             "BAPI_USER_PROFILES_ASSIGN", "BAPI_HELPVALUES_GET",
             "SUSR_LOGIN_CHECK_RFC", "PASSWORD_FORMAL_CHECK",
-            "SUSR_GET_ADMIN_USER_LOGIN_INFO"
+            "SUSR_GET_ADMIN_USER_LOGIN_INFO", "GET_SYSTEM_TIME_REMOTE"
 //            , "SUSR_BAPI_USER_UNLOCK"
 
             /*"BAPI_ADDRESSORG_GETDETAIL", "BAPI_ORGUNITEXT_DATA_GET", */ /* BAPI to Read Organization Addresses, Get data on organizational unit  */
@@ -144,6 +144,9 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
     public static final SimpleDateFormat SAP_DF = new SimpleDateFormat("yyyy-MM-dd");
     public static final SimpleDateFormat DATE_TIME = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+    // internal SAP DATS/TIMS formats, used as LOW values for BAPI_USER_GETLIST SELECTION_RANGE (MODDATE/MODTIME)
+    private static final SimpleDateFormat SAP_DATS = new SimpleDateFormat("yyyyMMdd");
+    private static final SimpleDateFormat SAP_TIMS = new SimpleDateFormat("HHmmss");
 
     private static final String SELECT = "X";
 
@@ -1969,13 +1972,29 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
         if (function == null)
             throw new RuntimeException("BAPI_USER_GETLIST not found in SAP.");
 
-        JCoTable exp = function.getTableParameterList().getTable("SELECTION_EXP");
-        exp.appendRow();
-        // modified users by date, You cannot combine the fields MODDATE and MODTIME for the parameter LAST_MODIFIED.
-        exp.setValue("PARAMETER", "LASTMODIFIED");
-        exp.setValue("OPTION", "GE");
-        exp.setValue("FIELD", "MODDATE");
-        exp.setValue("LOW", SAP_DF.format(fromToken));
+        // Use SELECTION_RANGE (ranges semantics: rows on different fields are AND-combined) so we can add a
+        // MODTIME bound without the LOGOP machinery that SELECTION_EXP requires for multiple rows.
+        JCoTable range = function.getTableParameterList().getTable("SELECTION_RANGE");
+        range.appendRow();
+        range.setValue("PARAMETER", "LASTMODIFIED");
+        range.setValue("FIELD", "MODDATE");
+        range.setValue("SIGN", "I");
+        range.setValue("OPTION", "GE");
+        range.setValue("LOW", SAP_DATS.format(fromToken)); // internal DATS format yyyyMMdd
+
+        // Narrow server-side by time as well, but only when the token date is the current SAP server day:
+        // MODDATE and MODTIME cannot be OR-combined, and a MODTIME floor applied across multiple days would
+        // wrongly drop users changed on a later day at an earlier time of day. The per-user
+        // lastModification.after(fromToken) check below remains the exact filter.
+        Date serverNow = getServerTime();
+        if (serverNow != null && SAP_DATS.format(fromToken).equals(SAP_DATS.format(serverNow))) {
+            range.appendRow();
+            range.setValue("PARAMETER", "LASTMODIFIED");
+            range.setValue("FIELD", "MODTIME");
+            range.setValue("SIGN", "I");
+            range.setValue("OPTION", "GE");
+            range.setValue("LOW", SAP_TIMS.format(fromToken)); // internal TIMS format HHmmss
+        }
 
         executeFunction(function);
 
@@ -2031,15 +2050,49 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     public SyncToken getLatestSyncToken(ObjectClass objectClass) {
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {    // __ACCOUNT__
 
-            // TODO better implementation?
-            Calendar now = new GregorianCalendar();
-            now.set(Calendar.MILLISECOND, 0); // we don't have milisecond precision from SAP in LASTMODIFIED
-            SyncToken syncToken = new SyncToken(now.getTime().getTime());
-            LOG.info("returning SyncToken: {0} ({1})", syncToken, now);
+            // Use the SAP server time as the high-water mark so it is directly comparable with the users'
+            // server-side MODDATE/MODTIME (no client/server clock or timezone skew). Fall back to the local
+            // clock only when GET_SYSTEM_TIME_REMOTE is unavailable.
+            Date now = getServerTime();
+            if (now == null) {
+                LOG.warn("GET_SYSTEM_TIME_REMOTE not available, falling back to local time for SyncToken");
+                Calendar local = new GregorianCalendar();
+                local.set(Calendar.MILLISECOND, 0); // we don't have milisecond precision from SAP in LASTMODIFIED
+                now = local.getTime();
+            }
+            // Take the high-water mark one second BEFORE the server time. MODTIME has only second
+            // precision and the change comparison is strict (lastModification.after(token)), so a change
+            // happening in the same second as this token would otherwise be missed on the next poll. The
+            // one-second overlap only causes a few changes to be re-read, which is harmless (sync is idempotent).
+            long tokenMillis = now.getTime() - 1000L;
+            SyncToken syncToken = new SyncToken(tokenMillis);
+            LOG.info("returning SyncToken: {0} ({1}, server time {2})", syncToken, new Date(tokenMillis), now);
             return syncToken;
 
         } else {
             throw new UnsupportedOperationException("Unsupported object class " + objectClass);
+        }
+    }
+
+    /**
+     * Current SAP server date/time via GET_SYSTEM_TIME_REMOTE, parsed with the same formatter used for the
+     * users' MODDATE/MODTIME so the values are directly comparable. Returns null (so callers can fall back
+     * to the local clock) when the function module is unavailable or not authorized.
+     */
+    private Date getServerTime() {
+        try {
+            JCoFunction function = destination.getRepository().getFunction("GET_SYSTEM_TIME_REMOTE");
+            if (function == null) {
+                return null;
+            }
+            function.execute(destination);
+            JCoParameterList exports = function.getExportParameterList();
+            String date = exports.getString("L_DATE"); // yyyy-MM-dd
+            String time = exports.getString("L_TIME"); // HH:mm:ss
+            return DATE_TIME.parse(date + " " + time);
+        } catch (Exception e) {
+            LOG.warn("Could not read SAP server time (GET_SYSTEM_TIME_REMOTE): {0}", e);
+            return null;
         }
     }
 
