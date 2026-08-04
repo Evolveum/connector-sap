@@ -327,6 +327,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
     private void buildAccountObjectClass(SchemaBuilder builder) {
         ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
+        objClassBuilder.setDescription("SAP user account");
 
         try {
             String function = "BAPI_USER_GET_DETAIL";
@@ -394,6 +395,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
             ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
             objClassBuilder.setType(configuration.getTableAliases().get(tableName));
+            objClassBuilder.setDescription("Records from SAP table " + tableName);
 
             for (Map.Entry<String, Integer> column : columnsMetadata.entrySet()) {
                 String columnName = column.getKey();
@@ -421,6 +423,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     private void buildProfileObjectClass(SchemaBuilder builder) {
         ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
         objClassBuilder.setType(PROFILE_NAME);
+        objClassBuilder.setDescription("SAP authorization profile");
 
         AttributeInfoBuilder uidAib = new AttributeInfoBuilder(Uid.NAME);
         uidAib.setRequired(true);
