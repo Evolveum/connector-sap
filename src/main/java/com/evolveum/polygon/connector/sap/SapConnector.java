@@ -91,6 +91,10 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     public static final String GROUPS = "GROUPS";
     public static final String GROUPS_USERGROUP = GROUPS + SEPARATOR + USERGROUP;
 
+    private static final Map<String, String> TABLE_OBJECT_CLASS_DESCRIPTIONS = Map.of(
+            "ACTIVITYGROUP", "SAP role definition",
+            "GROUP", "SAP user group in user master maintenance");
+
     // see for example http://www.sapdatasheet.org/abap/func/BAPI_USER_GET_DETAIL.html
     // these "Paremeter name"-s we can read and write in Type "Exporting"
     private static final String[] READ_WRITE_PARAMETERS = {"ADDRESS", "DEFAULTS", "UCLASS", "LOGONDATA", "ALIAS", "COMPANY", "REF_USER"};
@@ -327,6 +331,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
 
     private void buildAccountObjectClass(SchemaBuilder builder) {
         ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
+        objClassBuilder.setDescription("SAP user master record");
 
         try {
             String function = "BAPI_USER_GET_DETAIL";
@@ -393,7 +398,9 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
             Map<String, Integer> columnsMetadata = table.getValue();
 
             ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
-            objClassBuilder.setType(configuration.getTableAliases().get(tableName));
+            String tableAlias = configuration.getTableAliases().get(tableName);
+            objClassBuilder.setType(tableAlias);
+            objClassBuilder.setDescription(TABLE_OBJECT_CLASS_DESCRIPTIONS.get(tableAlias));
 
             for (Map.Entry<String, Integer> column : columnsMetadata.entrySet()) {
                 String columnName = column.getKey();
@@ -421,6 +428,7 @@ public class SapConnector implements PoolableConnector, TestOp, SchemaOp, Search
     private void buildProfileObjectClass(SchemaBuilder builder) {
         ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
         objClassBuilder.setType(PROFILE_NAME);
+        objClassBuilder.setDescription("SAP authorization profile included in a user master record");
 
         AttributeInfoBuilder uidAib = new AttributeInfoBuilder(Uid.NAME);
         uidAib.setRequired(true);
